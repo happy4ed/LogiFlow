@@ -11,20 +11,19 @@ autographer 마스터 규칙을 상속하되, LogiFlow 는 **자체 origin 을 �
 - 참조 레포: `happy4ed/Logitech-MX-Auto-Switch`(hidapitester 기반). 우리는 외부 exe
   의존 없이 Windows HID API P/Invoke 로 자체 구현.
 
-## 현재 판: 0.2.0 — 진단 + 전환 테스트 (통제된 쓰기)
+## 현재 판: 0.3.0 — 엣지 자동 전환 (트레이 상주)
 
-- 진단: HID++ 기기 열거(long 0x0202 + short 0x0201 + 벤더 usagePage) → IRoot
-  getFeature(0x1814) 인덱스 조회 → 0x1814 func0 getHostInfo → 기기 이름(0x0005).
-  직접(0xFF)·리시버(1~6) 전수 핑. short/long 리포트 자동 분기. 중복 기기 합침.
-- 목록 정리: 전환 가능(0x1814 지원) 기기만 기본 표시. 빈 슬롯·리시버 자신은 숨김.
-  "모두 보기(진단)" 토글(기본 끔)로 전체 열람.
-- 전환 테스트: 「채널 N로 전환」 버튼 → 전환 가능한 모든 기기에 각자 setHost(targetIndex)
-  전송(마우스·키보드가 같은 PC 로 함께 이동). 기기별 개별 전환 버튼도 있음.
-- **안전 불변식(통제된 쓰기): 쓰기는 0x1814 func1 setHost 하나뿐이며, (a)0x1814 지원
-  확인된 기기 (b)targetHost 가 0~hostCount-1 범위 (c)명시적 전환 버튼 클릭 — 이 3조건에서만
-  호출한다. 그 외 쓰기(SetFeature·SetOutputReport·모르는 func) 금지. setHost 는
-  `HostSwitcher` 를 통해서만, TX 바이트는 진단 로그에 남긴다.**
-- 설계 메모(다음 판): 전환을 엣지 감지(모니터 캔버스·LocalDex 재사용)로 자동화. 이번 판은 수동 버튼까지.
+- 진단·수동 전환(0.1.x~0.2.0 상속): HID++ 열거·0x1814 런타임 조회·getHostInfo·
+  수동 전환 버튼. 전환 가능 기기만 기본 표시, "모두 보기(진단)" 토글.
+- 엣지 자동 전환: 설정 캔버스에서 다른 채널 PC 박스를 모니터 변에 배치 → 커서가 그 변의
+  2px 띠에 dwell(기본 0.33초)+바깥밀기 하면 그 채널로 전환 가능한 모든 기기를 함께 이동.
+  raw 마우스(WM_INPUT)·논리좌표(GetCursorPos+Screen.Bounds)·엣지 판정은 LocalDex 이식.
+- 트레이 상주 + 로그인 자동 시작(HKCU Run). 창 닫으면 트레이로. 설정은 %APPDATA%\LogiFlow\config.txt.
+- **안전 불변식(통제된 쓰기): 쓰기는 0x1814 func1 setHost 하나뿐이며, `HostSwitcher` 경유로만,
+  (a)0x1814 지원 (b)targetHost 0~hostCount-1 범위 (c)명시 트리거(엣지 or 버튼) — 이 3조건에서만.
+  그 외 쓰기(SetFeature·SetOutputReport·모르는 func) 금지. 엣지는 설정에서 끌 수 있고 배치가
+  비면 무동작. 엣지 판정·전환 트리거는 진단 로그에 남긴다.**
+- 설계 메모(다음 판): 로그온 전 동작·설치파일·클립보드·ARM 빌드.
 
 ## 스택 / 빌드
 
@@ -38,5 +37,8 @@ autographer 마스터 규칙을 상속하되, LogiFlow 는 **자체 origin 을 �
 - `LogiFlow/Native/NativeMethods.cs` — HID/SetupAPI P/Invoke.
 - `LogiFlow/Hid/` — 열거(HidEnumerator)·오버랩드 송수신(HidStream).
 - `LogiFlow/Hidpp/HidppDevice.cs` — HID++ 프레이밍·IRoot·0x1814·0x0005.
-- `LogiFlow/Diagnostics/` — 스캐너(DeviceScanner)·로거(DiagLogger)·결과 모델.
-- `LogiFlow/MainForm.cs` — 읽기 전용 진단 창.
+- `LogiFlow/Diagnostics/` — 스캐너(DeviceScanner)·로거(DiagLogger)·결과 모델·전환(HostSwitcher).
+- `LogiFlow/Handoff/` — 엣지 판정(EdgeDetector·LocalDex 이식)·raw 마우스 감시(EdgeWatcher).
+- `LogiFlow/Config/` — 설정(AppConfig)·자동시작(AutoStart).
+- `LogiFlow/MonitorLayoutPanel.cs` — 모니터 배치 캔버스. `LogiFlow/TrayAppContext.cs` — 트레이 상주·오케스트레이션.
+- `LogiFlow/MainForm.cs` — 설정 창(진단·전환 탭 + 엣지 자동전환 탭).

@@ -6,68 +6,73 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using LogiFlow.Config;
 using LogiFlow.Diagnostics;
 
 namespace LogiFlow
 {
     /// <summary>
-    /// 진단 + 전환 테스트 창. 전환 가능한 기기(마우스·키보드)만 기본 표시하고,
-    /// 채널 전환 버튼을 제공한다. 전환(setHost)은 버튼 클릭 때만 호출된다.
+    /// 설정 창(트레이에서 열림). 탭1: 진단·수동 전환, 탭2: 엣지 자동 전환 배치.
+    /// 창을 닫으면 트레이로 내려간다(앱은 계속 상주).
     /// </summary>
     internal sealed class MainForm : Form
     {
-        private readonly DiagLogger _log;
-        private Button _refreshButton;
-        private Button _openLogButton;
+        private readonly TrayAppContext _tray;
+        private DiagLogger Log { get { return _tray.Log; } }
+
+        // 탭1
         private CheckBox _showAllCheck;
-        private Label _statusLabel;
         private TextBox _output;
         private Panel _transferPanel;
 
-        private List<ScanResult> _allResults = new List<ScanResult>();
+        // 탭2
+        private MonitorLayoutPanel _canvas;
+        private CheckBox _edgeEnableCheck;
+        private NumericUpDown _dwellUpDown;
+        private CheckBox _autoStartCheck;
+
         private bool _busy;
 
-        public MainForm(DiagLogger log)
+        public MainForm(TrayAppContext tray)
         {
-            _log = log;
+            _tray = tray;
             BuildUi();
         }
 
         private void BuildUi()
         {
-            Text = "LogiFlow — HID++ 진단 · 전환 테스트";
-            Width = 780;
-            Height = 640;
-            MinimumSize = new Size(600, 480);
+            Text = "LogiFlow — 설정";
+            Width = 820;
+            Height = 680;
+            MinimumSize = new Size(640, 520);
             StartPosition = FormStartPosition.CenterScreen;
             Font = new Font("Segoe UI", 9f);
+            ShowInTaskbar = true;
 
-            var topPanel = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(8) };
+            var tabs = new TabControl { Dock = DockStyle.Fill };
+            tabs.TabPages.Add(BuildDiagnosticsTab());
+            tabs.TabPages.Add(BuildEdgeTab());
+            Controls.Add(tabs);
 
-            _refreshButton = new Button { Text = "새로 고침", Width = 90, Height = 28, Left = 8, Top = 8 };
-            _refreshButton.Click += (s, e) => StartScan();
+            FormClosing += OnFormClosing;
+        }
 
-            _openLogButton = new Button { Text = "로그 폴더 열기", Width = 110, Height = 28, Left = 102, Top = 8 };
-            _openLogButton.Click += (s, e) => OpenLogFolder();
+        private TabPage BuildDiagnosticsTab()
+        {
+            var page = new TabPage("진단 · 수동 전환");
 
-            _showAllCheck = new CheckBox { Text = "모두 보기(진단)", Left = 222, Top = 12, AutoSize = true, Checked = false };
+            var top = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(8) };
+            var refreshBtn = new Button { Text = "새로 고침", Width = 90, Height = 26, Left = 8, Top = 6 };
+            refreshBtn.Click += (s, e) => _tray.Rescan();
+            var logBtn = new Button { Text = "로그 폴더 열기", Width = 110, Height = 26, Left = 102, Top = 6 };
+            logBtn.Click += (s, e) => OpenLogFolder();
+            _showAllCheck = new CheckBox { Text = "모두 보기(진단)", Left = 222, Top = 10, AutoSize = true, Checked = false };
             _showAllCheck.CheckedChanged += (s, e) => RenderResults();
+            top.Controls.Add(refreshBtn);
+            top.Controls.Add(logBtn);
+            top.Controls.Add(_showAllCheck);
 
-            _statusLabel = new Label { AutoSize = true, Left = 350, Top = 14, Text = "준비됨" };
-
-            topPanel.Controls.Add(_refreshButton);
-            topPanel.Controls.Add(_openLogButton);
-            topPanel.Controls.Add(_showAllCheck);
-            topPanel.Controls.Add(_statusLabel);
-
-            _transferPanel = new Panel
-            {
-                Dock = DockStyle.Bottom,
-                Height = 190,
-                Padding = new Padding(8),
-                BorderStyle = BorderStyle.FixedSingle,
-                AutoScroll = true,
-            };
+            _transferPanel = new Panel { Dock = DockStyle.Bottom, Height = 190, Padding = new Padding(8), BorderStyle = BorderStyle.FixedSingle, AutoScroll = true };
 
             _output = new TextBox
             {
@@ -80,102 +85,139 @@ namespace LogiFlow
                 BackColor = Color.White,
             };
 
-            Controls.Add(_output);
-            Controls.Add(topPanel);
-            Controls.Add(_transferPanel);
-
-            Shown += (s, e) => StartScan();
+            page.Controls.Add(_output);
+            page.Controls.Add(top);
+            page.Controls.Add(_transferPanel);
+            return page;
         }
 
-        private void StartScan()
+        private TabPage BuildEdgeTab()
         {
-            if (_busy)
-            {
-                return;
-            }
-            SetBusy(true, "스캔 중...");
-            _output.Text = "로지텍 HID++ 장치를 읽는 중입니다...";
+            var page = new TabPage("엣지 자동 전환");
 
-            var thread = new Thread(() =>
-            {
-                List<ScanResult> results;
-                string error = null;
-                try
-                {
-                    var scanner = new DeviceScanner(_log);
-                    results = scanner.Scan();
-                }
-                catch (Exception ex)
-                {
-                    results = new List<ScanResult>();
-                    error = ex.ToString();
-                    _log.LogError("스캔 예외: " + ex);
-                }
+            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 132, Padding = new Padding(10) };
 
-                BeginInvoke(new Action(() =>
-                {
-                    _allResults = results;
-                    if (error != null)
-                    {
-                        _output.Text = "스캔 중 오류가 발생했습니다.\r\n\r\n" + error;
-                        _statusLabel.Text = "오류 — 로그 확인";
-                        ClearTransferPanel("스캔 오류");
-                    }
-                    else
-                    {
-                        RenderResults();
-                        _statusLabel.Text = string.Format("{0:HH:mm:ss} 스캔 완료", DateTime.Now);
-                    }
-                    SetBusy(false, null);
-                }));
-            });
-            thread.IsBackground = true;
-            thread.Start();
+            _edgeEnableCheck = new CheckBox { Text = "엣지 자동 전환 사용", Left = 10, Top = 8, AutoSize = true, Checked = _tray.Config.EdgeSwitchEnabled };
+
+            var dwellLabel = new Label { Text = "엣지 유지(ms):", Left = 10, Top = 36, AutoSize = true };
+            _dwellUpDown = new NumericUpDown { Left = 110, Top = 32, Width = 70, Minimum = 100, Maximum = 2000, Increment = 10, Value = Clamp(_tray.Config.DwellMs, 100, 2000) };
+
+            _autoStartCheck = new CheckBox { Text = "로그인 시 자동 시작", Left = 10, Top = 62, AutoSize = true, Checked = _tray.Config.AutoStart };
+
+            var warn = new Label
+            {
+                Left = 10, Top = 88, Width = 560, Height = 34,
+                ForeColor = Color.FromArgb(176, 0, 32),
+                Text = "엣지에 닿으면 마우스·키보드가 그 채널 PC 로 넘어갑니다. 돌아오려면 그 PC 에서 "
+                     + "채널 1 을 누르거나 기기의 Easy-Switch 버튼을 쓰세요(이 PC 는 기기가 떠나 명령을 보낼 수 없음).",
+            };
+
+            var saveBtn = new Button { Text = "저장", Left = 600, Top = 60, Width = 90, Height = 30 };
+            saveBtn.Click += (s, e) => SaveEdgeConfig();
+
+            bottom.Controls.Add(_edgeEnableCheck);
+            bottom.Controls.Add(dwellLabel);
+            bottom.Controls.Add(_dwellUpDown);
+            bottom.Controls.Add(_autoStartCheck);
+            bottom.Controls.Add(warn);
+            bottom.Controls.Add(saveBtn);
+
+            _canvas = new MonitorLayoutPanel { Dock = DockStyle.Fill };
+
+            page.Controls.Add(_canvas);
+            page.Controls.Add(bottom);
+            return page;
         }
 
-        private void SetBusy(bool busy, string status)
+        private static int Clamp(int v, int lo, int hi)
         {
-            _busy = busy;
-            _refreshButton.Enabled = !busy;
-            if (status != null)
+            if (v < lo) return lo;
+            if (v > hi) return hi;
+            return v;
+        }
+
+        public void ShowSettings()
+        {
+            if (!Visible)
             {
-                _statusLabel.Text = status;
+                Show();
             }
-            foreach (Control c in _transferPanel.Controls)
+            if (WindowState == FormWindowState.Minimized)
             {
-                if (c is Button)
-                {
-                    c.Enabled = !busy;
-                }
+                WindowState = FormWindowState.Normal;
+            }
+            Activate();
+            BringToFront();
+            OnStateUpdated();
+        }
+
+        private void OnFormClosing(object sender, FormClosingEventArgs e)
+        {
+            // 사용자가 X 로 닫으면 종료하지 않고 트레이로 내려간다.
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                Hide();
             }
         }
+
+        /// <summary>트레이에서 스캔/상태 갱신 시 호출. 목록·캔버스 새로 그림.</summary>
+        public void OnStateUpdated()
+        {
+            RenderResults();
+            RefreshCanvas();
+        }
+
+        private void RefreshCanvas()
+        {
+            if (_canvas == null) return;
+            int maxHost = _tray.MaxHostCount();
+            int current = _tray.CurrentChannel();
+            var channels = new List<int>();
+            for (int h = 0; h < maxHost; h++)
+            {
+                if (h != current)
+                {
+                    channels.Add(h);
+                }
+            }
+            _canvas.SetData(channels, current, _tray.Config.Attachments);
+        }
+
+        private void SaveEdgeConfig()
+        {
+            _tray.Config.EdgeSwitchEnabled = _edgeEnableCheck.Checked;
+            _tray.Config.DwellMs = (int)_dwellUpDown.Value;
+            _tray.Config.AutoStart = _autoStartCheck.Checked;
+            _tray.Config.Attachments.Clear();
+            _tray.Config.Attachments.AddRange(_canvas.GetAttachments());
+            _tray.ApplyConfig();
+            MessageBox.Show(this,
+                string.Format("저장했습니다. 엣지 배치 {0}개.\r\n엣지 자동 전환: {1}",
+                    _tray.Config.Attachments.Count, _edgeEnableCheck.Checked ? "켬" : "끔"),
+                "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        // ---- 진단·전환 탭 ----
 
         private List<ScanResult> Switchable()
         {
-            var list = new List<ScanResult>();
-            foreach (var r in _allResults)
-            {
-                if (r.ChangeHostSupported && r.HostCount > 0)
-                {
-                    list.Add(r);
-                }
-            }
-            return list;
+            return _tray.Switchable();
         }
 
         private void RenderResults()
         {
+            if (_output == null) return;
             bool showAll = _showAllCheck.Checked;
             var shown = new List<ScanResult>();
-            foreach (var r in _allResults)
+            foreach (var r in _tray.LastResults)
             {
                 if (showAll || r.ChangeHostSupported)
                 {
                     shown.Add(r);
                 }
             }
-
-            _output.Text = FormatReport(shown, _allResults.Count, showAll);
+            _output.Text = FormatReport(shown, _tray.LastResults.Count, showAll);
             BuildTransferPanel();
         }
 
@@ -184,22 +226,14 @@ namespace LogiFlow
             var sb = new StringBuilder();
             sb.AppendLine("LogiFlow HID++ 진단 결과");
             sb.AppendLine(new string('=', 60));
-            if (showAll)
-            {
-                sb.AppendLine(string.Format("전체 응답 장치: {0}개 (진단 모드)", totalCount));
-            }
-            else
-            {
-                sb.AppendLine(string.Format("전환 가능 장치: {0}개  (전체 {1}개 중 · 빈 슬롯/리시버는 숨김)",
-                    shown.Count, totalCount));
-            }
+            sb.AppendLine(showAll
+                ? string.Format("전체 응답 장치: {0}개 (진단 모드)", totalCount)
+                : string.Format("전환 가능 장치: {0}개  (전체 {1}개 중 · 빈 슬롯/리시버 숨김)", shown.Count, totalCount));
             sb.AppendLine();
 
             if (shown.Count == 0)
             {
-                sb.AppendLine("표시할 장치가 없습니다.");
-                sb.AppendLine("로지텍 기기가 켜져 연결되어 있는지 확인하고 [새로 고침] 하세요.");
-                sb.AppendLine("자세한 내용은 [로그 폴더 열기] 의 logiflow-diag.log 참조.");
+                sb.AppendLine("표시할 장치가 없습니다. 기기 연결 확인 후 [새로 고침].");
                 return sb.ToString();
             }
 
@@ -233,78 +267,54 @@ namespace LogiFlow
             return sb.ToString();
         }
 
-        private void ClearTransferPanel(string message)
-        {
-            _transferPanel.Controls.Clear();
-            _transferPanel.Controls.Add(new Label { AutoSize = true, Top = 8, Left = 8, Text = message });
-        }
-
         private void BuildTransferPanel()
         {
             _transferPanel.Controls.Clear();
             var switchable = Switchable();
-
             if (switchable.Count == 0)
             {
-                ClearTransferPanel("전환 가능한 기기가 없습니다. (0x1814 지원 기기 미탐지)");
+                _transferPanel.Controls.Add(new Label { AutoSize = true, Left = 8, Top = 8, Text = "전환 가능한 기기가 없습니다. (0x1814 지원 기기 미탐지)" });
                 return;
             }
 
-            int maxHost = 1;
-            foreach (var d in switchable)
-            {
-                if (d.HostCount > maxHost)
-                {
-                    maxHost = d.HostCount;
-                }
-            }
-
+            int maxHost = _tray.MaxHostCount();
             int y = 6;
 
-            var title = new Label
+            _transferPanel.Controls.Add(new Label
             {
-                AutoSize = true, Left = 6, Top = y,
-                Font = new Font(Font, FontStyle.Bold),
-                Text = string.Format("전환 테스트 — 전환 가능 기기 {0}개", switchable.Count),
-            };
-            _transferPanel.Controls.Add(title);
+                AutoSize = true, Left = 6, Top = y, Font = new Font(Font, FontStyle.Bold),
+                Text = string.Format("수동 전환 — 전환 가능 기기 {0}개", switchable.Count),
+            });
             y += 22;
 
-            var warn = new Label
+            _transferPanel.Controls.Add(new Label
             {
-                AutoSize = false, Left = 6, Top = y, Width = 720, Height = 32,
+                AutoSize = false, Left = 6, Top = y, Width = 740, Height = 30,
                 ForeColor = Color.FromArgb(176, 0, 32),
-                Text = "누르면 마우스·키보드가 해당 PC 로 넘어갑니다. 돌아오려면 그 PC 에서 채널 1 을 "
-                     + "누르거나 기기의 Easy-Switch 버튼을 사용하세요.",
-            };
-            _transferPanel.Controls.Add(warn);
-            y += 36;
+                Text = "누르면 마우스·키보드가 해당 PC 로 넘어갑니다. 돌아오려면 그 PC 에서 채널 1 또는 Easy-Switch 버튼.",
+            });
+            y += 34;
 
-            // 전체 전환 버튼(모든 전환 가능 기기를 같은 채널로).
-            var allLabel = new Label { AutoSize = true, Left = 6, Top = y + 4, Text = "모두 함께:" };
-            _transferPanel.Controls.Add(allLabel);
+            _transferPanel.Controls.Add(new Label { AutoSize = true, Left = 6, Top = y + 4, Text = "모두 함께:" });
             int bx = 78;
             for (int h = 0; h < maxHost; h++)
             {
                 int target = h;
-                var b = new Button { Text = string.Format("채널 {0}로 전환", h + 1), Width = 104, Height = 26, Left = bx, Top = y };
+                var b = new Button { Text = string.Format("채널 {0}로", h + 1), Width = 76, Height = 26, Left = bx, Top = y };
                 b.Click += (s, e) => DoSwitchAll(target);
                 _transferPanel.Controls.Add(b);
-                bx += 110;
+                bx += 82;
             }
             y += 34;
 
-            // 기기별 개별 전환.
             foreach (var d in switchable)
             {
                 string cur = d.CurrentHost >= 0 ? (d.CurrentHost + 1).ToString() : "?";
-                var devLabel = new Label
+                _transferPanel.Controls.Add(new Label
                 {
                     AutoSize = true, Left = 6, Top = y + 4,
                     Text = string.Format("{0}  (현재 채널 {1})", d.DeviceName, cur),
-                };
-                _transferPanel.Controls.Add(devLabel);
-
+                });
                 int dbx = 360;
                 int hosts = d.HostCount > 0 ? d.HostCount : maxHost;
                 for (int h = 0; h < hosts; h++)
@@ -318,76 +328,63 @@ namespace LogiFlow
                 }
                 y += 30;
             }
+
+            foreach (Control c in _transferPanel.Controls)
+            {
+                if (c is Button) c.Enabled = !_busy;
+            }
         }
 
         private bool ConfirmSwitch(string what, int targetHost)
         {
-            var result = MessageBox.Show(this,
-                string.Format("{0} 를 채널 {1} 로 전환합니다.\r\n\r\n"
-                    + "해당 PC 로 넘어가며, 이 PC 에서는 기기가 사라집니다.\r\n"
-                    + "돌아오려면 그 PC 에서 채널 1 을 누르거나 기기의 Easy-Switch 버튼을 쓰세요.\r\n\r\n"
-                    + "진행할까요?", what, targetHost + 1),
-                "LogiFlow 전환 확인", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-            return result == DialogResult.Yes;
+            return MessageBox.Show(this,
+                string.Format("{0} 를 채널 {1} 로 전환합니다.\r\n\r\n해당 PC 로 넘어가며 이 PC 에서는 기기가 사라집니다.\r\n진행할까요?",
+                    what, targetHost + 1),
+                "LogiFlow 전환 확인", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
         }
 
         private void DoSwitchAll(int targetHost)
         {
-            if (_busy)
-            {
-                return;
-            }
-            if (!ConfirmSwitch("전환 가능한 모든 기기", targetHost))
-            {
-                return;
-            }
+            if (_busy) return;
+            if (!ConfirmSwitch("전환 가능한 모든 기기", targetHost)) return;
             RunSwitch(() =>
             {
-                int sent = HostSwitcher.SwitchAll(Switchable(), targetHost, _log);
+                int sent = HostSwitcher.SwitchAll(Switchable(), targetHost, Log);
                 return string.Format("채널 {0}로 전체 전환: {1}개 전송", targetHost + 1, sent);
             });
         }
 
         private void DoSwitchOne(ScanResult device, int targetHost)
         {
-            if (_busy)
-            {
-                return;
-            }
-            if (!ConfirmSwitch(device.DeviceName, targetHost))
-            {
-                return;
-            }
+            if (_busy) return;
+            if (!ConfirmSwitch(device.DeviceName, targetHost)) return;
             RunSwitch(() =>
             {
-                bool ok = HostSwitcher.SwitchOne(device, targetHost, _log);
-                return string.Format("{0} → 채널 {1}: {2}", device.DeviceName, targetHost + 1,
-                    ok ? "전송" : "실패(로그 확인)");
+                bool ok = HostSwitcher.SwitchOne(device, targetHost, Log);
+                return string.Format("{0} → 채널 {1}: {2}", device.DeviceName, targetHost + 1, ok ? "전송" : "실패(로그 확인)");
             });
         }
 
         private void RunSwitch(Func<string> action)
         {
-            SetBusy(true, "전환 전송 중...");
+            _busy = true;
+            BuildTransferPanel();
             var thread = new Thread(() =>
             {
                 string msg;
+                try { msg = action(); }
+                catch (Exception ex) { msg = "전환 오류: " + ex.Message; Log.LogError("전환 오류: " + ex); }
                 try
                 {
-                    msg = action();
+                    BeginInvoke(new Action(() =>
+                    {
+                        _busy = false;
+                        BuildTransferPanel();
+                        MessageBox.Show(this, msg + "\r\n\r\n전환된 기기는 이 PC 에서 사라집니다. [새로 고침] 으로 다시 읽을 수 있습니다.",
+                            "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }));
                 }
-                catch (Exception ex)
-                {
-                    msg = "전환 오류: " + ex.Message;
-                    _log.LogError("전환 오류: " + ex);
-                }
-                BeginInvoke(new Action(() =>
-                {
-                    SetBusy(false, msg);
-                    MessageBox.Show(this,
-                        msg + "\r\n\r\n전환된 기기는 이 PC 에서 사라집니다. [새로 고침] 으로 현재 상태를 다시 읽을 수 있습니다.",
-                        "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }));
+                catch { _busy = false; }
             });
             thread.IsBackground = true;
             thread.Start();
@@ -397,8 +394,8 @@ namespace LogiFlow
         {
             try
             {
-                Directory.CreateDirectory(_log.LogDirectory);
-                Process.Start("explorer.exe", "\"" + _log.LogDirectory + "\"");
+                Directory.CreateDirectory(Log.LogDirectory);
+                Process.Start("explorer.exe", "\"" + Log.LogDirectory + "\"");
             }
             catch (Exception ex)
             {

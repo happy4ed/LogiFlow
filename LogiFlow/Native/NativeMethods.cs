@@ -156,5 +156,102 @@ namespace LogiFlow.Native
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.U1)]
         public static extern bool CloseHandle(IntPtr handle);
+
+        // ---- Raw input / cursor (엣지 자동 전환용) ----
+        // 출처: LocalDex DexManager/Services/InputHandoffService.cs 의 raw input 블록을 이식.
+        public const int WM_INPUT = 0x00FF;
+        public const uint RID_INPUT = 0x10000003;
+        public const uint RIM_TYPEMOUSE = 0;
+        public const uint RIDEV_INPUTSINK = 0x00000100;
+        public const uint RIDEV_REMOVE = 0x00000001;
+        public const ushort MOUSE_MOVE_ABSOLUTE = 0x01;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct POINT
+        {
+            public int X;
+            public int Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RAWINPUTDEVICE
+        {
+            public ushort usUsagePage;
+            public ushort usUsage;
+            public uint dwFlags;
+            public IntPtr hwndTarget;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RAWINPUTHEADER
+        {
+            public uint dwType;
+            public uint dwSize;
+            public IntPtr hDevice;
+            public IntPtr wParam;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.U1)]
+        public static extern bool GetCursorPos(out POINT point);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.U1)]
+        public static extern bool RegisterRawInputDevices(RAWINPUTDEVICE[] devices, uint count, uint size);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern uint GetRawInputData(IntPtr rawInput, uint command, IntPtr data, ref uint size, uint headerSize);
+
+        /// <summary>WM_INPUT 패킷에서 상대 이동(dx,dy)만 읽는다. 절대 좌표 장치는 무시.</summary>
+        public static bool TryReadRelativeMouse(IntPtr rawInput, out int dx, out int dy)
+        {
+            dx = 0;
+            dy = 0;
+            uint headerSize = (uint)Marshal.SizeOf(typeof(RAWINPUTHEADER));
+            uint size = 0;
+            GetRawInputData(rawInput, RID_INPUT, IntPtr.Zero, ref size, headerSize);
+            if (size == 0 || size > 1024)
+            {
+                return false;
+            }
+            IntPtr buffer = Marshal.AllocHGlobal((int)size);
+            try
+            {
+                if (GetRawInputData(rawInput, RID_INPUT, buffer, ref size, headerSize) != size)
+                {
+                    return false;
+                }
+                var header = (RAWINPUTHEADER)Marshal.PtrToStructure(buffer, typeof(RAWINPUTHEADER));
+                if (header.dwType != RIM_TYPEMOUSE)
+                {
+                    return false;
+                }
+                int offset = (int)headerSize;
+                ushort flags = (ushort)Marshal.ReadInt16(buffer, offset);
+                if ((flags & MOUSE_MOVE_ABSOLUTE) != 0)
+                {
+                    return false;
+                }
+                dx = Marshal.ReadInt32(buffer, offset + 12);
+                dy = Marshal.ReadInt32(buffer, offset + 16);
+                return true;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        public static bool RegisterMouseRawInput(IntPtr window, bool add)
+        {
+            var device = new RAWINPUTDEVICE
+            {
+                usUsagePage = 0x01,
+                usUsage = 0x02,
+                dwFlags = add ? RIDEV_INPUTSINK : RIDEV_REMOVE,
+                hwndTarget = add ? window : IntPtr.Zero,
+            };
+            return RegisterRawInputDevices(new[] { device }, 1, (uint)Marshal.SizeOf(typeof(RAWINPUTDEVICE)));
+        }
     }
 }

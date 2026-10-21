@@ -46,6 +46,15 @@
     <Compile Include="MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="TrayAppContext.cs" />
+    <Compile Include="MonitorLayoutPanel.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Config\AppConfig.cs" />
+    <Compile Include="Config\AutoStart.cs" />
+    <Compile Include="Handoff\HandoffPrimitives.cs" />
+    <Compile Include="Handoff\EdgeDetector.cs" />
+    <Compile Include="Handoff\EdgeWatcher.cs" />
     <Compile Include="Native\NativeMethods.cs" />
     <Compile Include="Hid\HidInterfaceInfo.cs" />
     <Compile Include="Hid\HidEnumerator.cs" />
