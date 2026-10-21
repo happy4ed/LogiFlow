@@ -66,6 +66,7 @@ namespace LogiFlow.Hidpp
 
         public byte[] Call(byte deviceIndex, byte featureIndex, byte funcIndex, byte[] parms, int timeoutMs)
         {
+            byte funcByte = FuncByte(funcIndex);
             byte[] report = BuildReport(deviceIndex, featureIndex, funcIndex, parms);
 
             _log.LogTx(deviceIndex, report);
