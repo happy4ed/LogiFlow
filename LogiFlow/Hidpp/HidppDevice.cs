@@ -6,8 +6,9 @@ using LogiFlow.Hid;
 namespace LogiFlow.Hidpp
 {
     /// <summary>
-    /// 한 HID++ 인터페이스(long 0x0202) 위에서 특정 deviceIndex 를 상대로
-    /// 조회성 호출을 수행한다. 읽기 전용: func0 / IRoot(0x0000) / DeviceName(0x0005) 만 보낸다.
+    /// 한 HID++ 인터페이스(long 0x0202 또는 short 0x0201) 위에서 특정 deviceIndex 를 상대로
+    /// 조회성 호출을 수행한다. 출력 리포트 길이로 long(0x11)/short(0x10) 프레임을 자동 선택한다.
+    /// 읽기 전용: func0 / IRoot(0x0000) / DeviceName(0x0005) 만 보낸다.
     /// </summary>
     internal sealed class HidppDevice
     {
@@ -37,21 +38,27 @@ namespace LogiFlow.Hidpp
         }
 
         /// <summary>
-        /// long 리포트로 호출하고 응답 payload(파라미터 16바이트)를 돌려준다.
+        /// HID++ 리포트로 호출하고 응답 payload(파라미터)를 돌려준다.
+        /// 인터페이스가 long(20바이트)이면 0x11, 아니면 short(0x10·7바이트) 프레임을 쓴다.
         /// 타임아웃 시 null, 오류 응답 시 HidppErrorException.
         /// </summary>
         public byte[] Call(byte deviceIndex, byte featureIndex, byte funcIndex, byte[] parms, int timeoutMs)
         {
             byte funcByte = FuncByte(funcIndex);
 
-            var report = new byte[20];
-            report[0] = ReportIdLong;
+            // 출력 리포트 길이로 프레임 종류 결정: >=20 이면 long(0x11), 아니면 short(0x10).
+            bool useLong = _stream.OutputReportByteLength >= 20;
+            int reportLen = useLong ? 20 : 7;
+            int maxParams = useLong ? 16 : 3;
+
+            var report = new byte[reportLen];
+            report[0] = useLong ? ReportIdLong : ReportIdShort;
             report[1] = deviceIndex;
             report[2] = featureIndex;
             report[3] = funcByte;
             if (parms != null)
             {
-                int n = Math.Min(parms.Length, 16);
+                int n = Math.Min(parms.Length, maxParams);
                 Array.Copy(parms, 0, report, 4, n);
             }
 

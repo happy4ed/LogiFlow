@@ -57,11 +57,14 @@ namespace LogiFlow.Diagnostics
 
             foreach (var iface in interfaces)
             {
-                // HID++ 후보: 벤더 컬렉션(usage 0x0202) 또는 벤더 usagePage(0xFFxx)에 20바이트
-                // 출력 리포트가 있는 인터페이스. caps 를 못 읽은 것은 다른 프로세스 선점이라 건너뜀.
+                // HID++ 후보: long(usage 0x0202, 20바이트) + short(usage 0x0201, 7바이트)
+                // 벤더 컬렉션, 그리고 벤더 usagePage(0xFFxx)에 7바이트 이상 출력 리포트가 있는
+                // 인터페이스 모두. caps 를 못 읽은 것(다른 프로세스 선점)은 건너뛰되 로그엔 남는다.
                 bool candidate = iface.CapsRead &&
-                    (iface.Usage == UsageLong ||
-                     (iface.UsagePage >= 0xFF00 && iface.OutputReportByteLength >= 19));
+                    (iface.Usage == UsageLong || iface.Usage == UsageShort ||
+                     (iface.UsagePage >= 0xFF00 && iface.OutputReportByteLength >= 7));
+                _log.Log(string.Format("  iface {0} usage=0x{1:X4} 후보={2}",
+                    iface.VidPid, iface.Usage, candidate ? "예" : "아니오"));
                 if (!candidate)
                 {
                     continue;
@@ -70,12 +73,48 @@ namespace LogiFlow.Diagnostics
                 ProbeInterface(iface, results);
             }
 
-            if (results.Count == 0)
+            List<ScanResult> deduped = Deduplicate(results);
+
+            if (deduped.Count == 0)
             {
                 _log.Log("응답한 HID++ 장치 없음");
             }
-            _log.Log(string.Format("=== 스캔 종료: 장치 {0}개 ===", results.Count));
-            return results;
+            _log.Log(string.Format("=== 스캔 종료: 후보 응답 {0}건 → 중복 제거 후 장치 {1}개 ===",
+                results.Count, deduped.Count));
+            return deduped;
+        }
+
+        /// <summary>
+        /// 같은 물리 기기가 여러 인터페이스(long/short)로 잡히면 하나로 합친다.
+        /// 키 = 이름 + deviceIndex + 연결 방식. 서로 다른 기기는 모두 남긴다.
+        /// 정보가 더 풍부한 쪽(0x1814 지원)을 유지한다.
+        /// </summary>
+        private static List<ScanResult> Deduplicate(List<ScanResult> results)
+        {
+            var map = new Dictionary<string, ScanResult>();
+            var order = new List<string>();
+            foreach (var r in results)
+            {
+                string key = (r.DeviceName ?? "") + "|" + r.DeviceIndex + "|" + (r.ConnectionType ?? "");
+                ScanResult existing;
+                if (!map.TryGetValue(key, out existing))
+                {
+                    map[key] = r;
+                    order.Add(key);
+                }
+                else if (!existing.ChangeHostSupported && r.ChangeHostSupported)
+                {
+                    // 0x1814 정보를 더 많이 가진 쪽으로 교체.
+                    map[key] = r;
+                }
+            }
+
+            var list = new List<ScanResult>();
+            foreach (var key in order)
+            {
+                list.Add(map[key]);
+            }
+            return list;
         }
 
         private void ProbeInterface(HidInterfaceInfo iface, List<ScanResult> results)
@@ -100,13 +139,19 @@ namespace LogiFlow.Diagnostics
                     bool present;
                     try
                     {
-                        present = hidpp.Ping(deviceIndex, ProbeTimeoutMs);
+                        // 잠자는 기기(특히 키보드)를 고려해 1회 재시도.
+                        present = hidpp.Ping(deviceIndex, ProbeTimeoutMs)
+                                  || hidpp.Ping(deviceIndex, ProbeTimeoutMs);
                     }
                     catch (Exception ex)
                     {
                         _log.LogError(string.Format("ping dev=0x{0:X2}: {1}", deviceIndex, ex.Message));
                         present = false;
                     }
+
+                    // 각 인터페이스×deviceIndex 핑 결과를 한 줄씩 남긴다(안 잡힌 index 가 타임아웃인지 가시화).
+                    _log.Log(string.Format("  ping {0} dev=0x{1:X2} → {2}",
+                        iface.VidPid, deviceIndex, present ? "응답" : "타임아웃"));
 
                     if (!present)
                     {
