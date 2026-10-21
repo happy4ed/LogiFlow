@@ -11,7 +11,13 @@ autographer 마스터 규칙을 상속하되, LogiFlow 는 **자체 origin 을 �
 - 참조 레포: `happy4ed/Logitech-MX-Auto-Switch`(hidapitester 기반). 우리는 외부 exe
   의존 없이 Windows HID API P/Invoke 로 자체 구현.
 
-## 현재 판: 0.6.0 — 엣지 전환 glow/tension 효과
+## 현재 판: 0.7.0 — 글자 크기 3단(pt 가산) · 앱 가로 확대 · 캔버스 잘림 제거
+
+- 글자 크기: 작게 −1 · **보통 +1(기본)** · 크게 +3 pt 가산(`UiFont.SetOffset`·`Config.FontOffset`). 비율 스케일 폐지.
+- 창 1120×650(최소 980×600). 배치 캔버스 여백 = 모니터 1칸↑(가로 1.3·세로 1.6)로 변 박스·라벨 안 잘림. 미배치 채널 박스는 한 줄에 개수만큼 폭 줄여 전부 표시.
+- Mac 설치파일·로그온 전 서비스는 다음 판에서.
+
+## 이전 판: 0.6.0 — 엣지 전환 glow/tension 효과
 
 - 엣지(자동 전환 변)에 커서가 닿아 progress 가 쌓이면 glow 오버레이: 색 진해짐 + 변쪽 띠가
   두꺼워지는 tension + 전환 순간 pop/flash. 레이어드·클릭 통과·최상위(UpdateLayeredWindow,

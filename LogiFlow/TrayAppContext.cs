@@ -36,7 +36,7 @@ namespace LogiFlow
 
             // 설정 적용(테마·글자크기·로그).
             Theme.SetMode(Config.Theme);
-            UiFont.SetPercent(Config.FontScalePercent);
+            UiFont.SetOffset(Config.FontOffset);
             Log.Enabled = Config.DiagLogEnabled;
 
             // 캐시로 즉시 표시(매번 재검색 안 함).

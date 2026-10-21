@@ -128,16 +128,21 @@ namespace LogiFlow
             if (_screens.Length == 0) return;
 
             int vLeft = int.MaxValue, vTop = int.MaxValue, vRight = int.MinValue, vBottom = int.MinValue;
+            double sumWo = 0, sumHo = 0;
             foreach (Screen s in _screens)
             {
                 Rectangle b = s.Bounds;
                 vLeft = Math.Min(vLeft, b.Left); vTop = Math.Min(vTop, b.Top);
                 vRight = Math.Max(vRight, b.Right); vBottom = Math.Max(vBottom, b.Bottom);
+                sumWo += b.Width; sumHo += b.Height;
             }
-            int vW = Math.Max(1, vRight - vLeft), vH = Math.Max(1, vBottom - vTop);
-            int marginX = (int)(vW * 0.40), marginY = (int)(vH * 0.40);
+            int n = _screens.Length;
+            double avgWo = sumWo / n, avgHo = sumHo / n;
+            // 변에 붙는 채널 박스 = 모니터 1칸 크기. 플러시로 붙으면 모니터 바깥으로 1칸 나가고 라벨이
+            // 위·아래로 더 나가므로, 여백을 모니터 1칸 이상(가로 1.3칸·세로 1.6칸) 확보해 잘리지 않게 한다.
+            int marginX = (int)(avgWo * 1.3), marginY = (int)(avgHo * 1.6);
             vLeft -= marginX; vRight += marginX; vTop -= marginY; vBottom += marginY;
-            vW = Math.Max(1, vRight - vLeft); vH = Math.Max(1, vBottom - vTop);
+            int vW = Math.Max(1, vRight - vLeft), vH = Math.Max(1, vBottom - vTop);
 
             double scale = Math.Min((ClientSize.Width - 2.0 * Pad) / vW, (ClientSize.Height - 2.0 * Pad) / vH);
             if (scale <= 0) scale = 0.01;
@@ -165,9 +170,18 @@ namespace LogiFlow
             if (box == _dragging || !box.Placed)
             {
                 if (box.Rect.Width > 0) return box.Rect;
-                float tw = _boxW * 0.78f, th = _boxH * 0.78f;
-                float x = Pad + trayIndex * (tw + 12);
-                float y = ClientSize.Height - th - Pad;
+                // 미배치(트레이) 박스는 하단 한 줄에 모두 들어오도록 폭을 줄인다 — 개수가 많아도 잘리지 않게.
+                int count = 0;
+                foreach (var b in _boxes) if (!b.Placed && b != _dragging) count++;
+                if (count < 1) count = 1;
+                const float gap = 12f;
+                float avail = ClientSize.Width - 2f * Pad - (count - 1) * gap;
+                float tw = Math.Min(_boxW * 0.78f, avail / count);
+                if (tw < 1f) tw = 1f;
+                float aspect = _boxW > 1f ? (_boxH / _boxW) : 0.6f;
+                float th = tw * aspect;
+                float x = Pad + trayIndex * (tw + gap);
+                float y = ClientSize.Height - th - Pad - 2;
                 return new RectangleF(x, y, tw, th);
             }
             if (box.MonitorIndex < 0 || box.MonitorIndex >= _monitorPanelRects.Count)

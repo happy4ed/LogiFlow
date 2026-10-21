@@ -39,8 +39,8 @@ namespace LogiFlow
             Text = "LogiFlow";
             Icon = AppIcon.Get();
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(900, 620);
-            MinimumSize = new Size(760, 560);
+            ClientSize = new Size(1120, 650);
+            MinimumSize = new Size(980, 600);
             Font = UiFont.Get(10f);
 
             _sidebar = new Panel { Dock = DockStyle.Left, Width = 182, Padding = new Padding(12, 14, 12, 12) };
@@ -220,7 +220,7 @@ namespace LogiFlow
             page.Controls.Add(refresh);
             y += 58;
 
-            int canvasH = 320;
+            int canvasH = 380;
             var canvas = new MonitorLayoutPanel { Left = 24, Top = y, Width = W, Height = canvasH };
             int maxHost = _tray.MaxHostCount();
             int current = _tray.CurrentChannel();
@@ -418,18 +418,18 @@ namespace LogiFlow
             themeCard.Controls.Add(seg);
             themeCard.Controls.Add(new Panel { Left = 16, Top = 66, Width = W - 32, Height = 1, BackColor = Theme.Divider });
 
-            // 글자 크기
+            // 글자 크기(pt 가산: 작게 -1 · 보통 +1 · 크게 +3)
             var segFont = new SegmentedControl { Left = W - 246, Top = 83, Width = 224, Height = 34 };
-            int fontIdx = Config.FontScalePercent >= 140 ? 2 : (Config.FontScalePercent >= 120 ? 1 : 0);
-            segFont.SetItems(new[] { "보통", "크게", "아주 크게" }, fontIdx);
+            int fontIdx = Config.FontOffset >= 3 ? 2 : (Config.FontOffset <= -1 ? 0 : 1);
+            segFont.SetItems(new[] { "작게", "보통", "크게" }, fontIdx);
             segFont.SelectedChanged += (s, e) =>
             {
-                int pct = segFont.SelectedIndex == 2 ? 140 : (segFont.SelectedIndex == 1 ? 120 : 100);
-                Config.FontScalePercent = pct;
-                UiFont.SetPercent(pct);
+                int off = segFont.SelectedIndex == 2 ? 3 : (segFont.SelectedIndex == 0 ? -1 : 1);
+                Config.FontOffset = off;
+                UiFont.SetOffset(off);
                 _tray.ApplyConfig();
             };
-            themeCard.Controls.Add(MakeRowLabel("글자 크기", "작은 글자가 안 보이면 키우세요. 최소 크기 이상은 항상 보장됩니다.", 82));
+            themeCard.Controls.Add(MakeRowLabel("글자 크기", "보통이 기본입니다. 작은 글자가 안 보이면 크게로 키우세요.", 82));
             themeCard.Controls.Add(segFont);
 
             page.Controls.Add(themeCard);

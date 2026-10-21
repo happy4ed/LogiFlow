@@ -27,7 +27,7 @@ namespace LogiFlow.Config
         public bool DragGuard = true;            // 드래그 중 전환 안 함(디텍터가 buttonDown 무시).
         public bool DiagLogEnabled = true;       // 진단 로그 남기기.
         public bool PreLogon = false;            // 로그온 전에도 실행(고급·준비 중). 실제 서비스는 다음 판.
-        public int FontScalePercent = 100;       // 글자 크기(%). 100/120/140. 최소크기와 함께 동작.
+        public int FontOffset = 1;                // 글자 크기 단계(pt 가산). 작게 -1 · 보통 +1 · 크게 +3.
         public ThemeMode Theme = ThemeMode.System;
         public readonly List<EdgeAttachment> Attachments = new List<EdgeAttachment>();
         public readonly Dictionary<int, string> Aliases = new Dictionary<int, string>(); // 채널(0-base)→별칭
@@ -86,9 +86,9 @@ namespace LogiFlow.Config
                         case "dragGuard": cfg.DragGuard = val == "1"; break;
                         case "diagLog": cfg.DiagLogEnabled = val == "1"; break;
                         case "preLogon": cfg.PreLogon = val == "1"; break;
-                        case "fontScale":
-                            int fs;
-                            if (int.TryParse(val, out fs) && fs >= 80 && fs <= 160) cfg.FontScalePercent = fs;
+                        case "fontOffset":
+                            int fo;
+                            if (int.TryParse(val, out fo) && fo >= -2 && fo <= 6) cfg.FontOffset = fo;
                             break;
                         case "theme":
                             int tm;
@@ -143,7 +143,7 @@ namespace LogiFlow.Config
                 sb.AppendLine("dragGuard=" + (DragGuard ? "1" : "0"));
                 sb.AppendLine("diagLog=" + (DiagLogEnabled ? "1" : "0"));
                 sb.AppendLine("preLogon=" + (PreLogon ? "1" : "0"));
-                sb.AppendLine("fontScale=" + FontScalePercent.ToString(CultureInfo.InvariantCulture));
+                sb.AppendLine("fontOffset=" + FontOffset.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("theme=" + ((int)Theme).ToString(CultureInfo.InvariantCulture));
                 foreach (var kv in Aliases)
                 {
