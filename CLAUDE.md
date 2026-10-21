@@ -11,7 +11,14 @@ autographer 마스터 규칙을 상속하되, LogiFlow 는 **자체 origin 을 �
 - 참조 레포: `happy4ed/Logitech-MX-Auto-Switch`(hidapitester 기반). 우리는 외부 exe
   의존 없이 Windows HID API P/Invoke 로 자체 구현.
 
-## 현재 판: 0.5.0 — UI 다듬기 (폰트 최소/스케일·테마 스크롤바·가로스크롤 0)
+## 현재 판: 0.6.0 — 엣지 전환 glow/tension 효과
+
+- 엣지(자동 전환 변)에 커서가 닿아 progress 가 쌓이면 glow 오버레이: 색 진해짐 + 변쪽 띠가
+  두꺼워지는 tension + 전환 순간 pop/flash. 레이어드·클릭 통과·최상위(UpdateLayeredWindow,
+  per-pixel alpha), ~60fps, 입력 방해 0, 다중 모니터 4변 지원. 자동 전환 끄면 안 뜸.
+- `LogiFlow/Ui/GlowOverlay.cs`(GlowOverlayForm+GlowController), `EdgeWatcher` 가 EdgeGlow 전달.
+
+## 이전 판: 0.5.0 — UI 다듬기 (폰트 최소/스케일·테마 스크롤바·가로스크롤 0)
 
 - 폰트: 전역 최소 ≈12.7px 보장 + 글자 크기(보통/크게/아주 크게, %스케일) 설정. 모든 Font 는
   `UiFont.Get`(캐시·최소크기 floor·스케일). dispose 금지.

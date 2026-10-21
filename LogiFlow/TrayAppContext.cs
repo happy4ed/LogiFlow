@@ -22,6 +22,7 @@ namespace LogiFlow
         private NotifyIcon _tray;
         private ContextMenuStrip _menu;
         private EdgeWatcher _watcher;
+        private GlowController _glow;
         private MainForm _settings;
         private bool _scanning;
         private bool _exiting;
@@ -41,7 +42,8 @@ namespace LogiFlow
             // 캐시로 즉시 표시(매번 재검색 안 함).
             LastResults = DeviceCache.Load();
 
-            _watcher = new EdgeWatcher(log, OnEdgeTrigger);
+            _glow = new GlowController();
+            _watcher = new EdgeWatcher(log, OnEdgeTrigger, _glow.Update);
 
             _settings = new MainForm(this);
             var forceHandle = _settings.Handle;
@@ -259,6 +261,7 @@ namespace LogiFlow
             if (_exiting) return;
             _exiting = true;
             try { _watcher.Dispose(); } catch { }
+            try { _glow.Dispose(); } catch { }
             try { _tray.Visible = false; _tray.Dispose(); } catch { }
             Log.Log("LogiFlow 종료(트레이)");
             ExitThread();

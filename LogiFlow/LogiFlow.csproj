@@ -72,6 +72,7 @@
     <Compile Include="Ui\Icons.cs" />
     <Compile Include="Ui\ThemedControls.cs" />
     <Compile Include="Ui\ThemedScroll.cs" />
+    <Compile Include="Ui\GlowOverlay.cs" />
     <Compile Include="Ui\Prompt.cs" />
     <Compile Include="Ui\AppIcon.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

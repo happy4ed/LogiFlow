@@ -9,6 +9,17 @@ using LogiFlow.Native;
 
 namespace LogiFlow.Handoff
 {
+    /// <summary>엣지 glow 오버레이 상태(EdgeWatcher → GlowController).</summary>
+    internal struct EdgeGlow
+    {
+        public bool Active;       // 변에 닿아 progress 가 쌓이는 중
+        public bool Fired;        // 전환 순간(pop)
+        public HandoffRect Monitor;
+        public HandoffEdge Edge;
+        public double Progress;   // 0..1
+        public int Channel;       // 0-base
+    }
+
     /// <summary>
     /// 엣지 자동 전환 감시기. 숨은 메시지 창으로 WM_INPUT(raw 마우스)을 받아,
     /// 커서가 설정된 모니터 변의 좁은 띠에서 dwell+바깥밀기를 만족하면 그 변의 채널로 전환을 트리거한다.
@@ -56,11 +67,14 @@ namespace LogiFlow.Handoff
         private bool _running;
         private int _dwellMs = EdgeDetector.DefaultDwellMs;
         private long _lastSampleMs = -1;
+        private readonly Action<EdgeGlow> _onGlow;
+        private bool _lastGlowActive;
 
-        internal EdgeWatcher(DiagLogger log, Action<int> onTrigger)
+        internal EdgeWatcher(DiagLogger log, Action<int> onTrigger, Action<EdgeGlow> onGlow)
         {
             _log = log;
             _onTrigger = onTrigger;
+            _onGlow = onGlow;
         }
 
         public bool IsRunning { get { return _running; } }
@@ -123,6 +137,11 @@ namespace LogiFlow.Handoff
             {
             }
             _running = false;
+            if (_lastGlowActive)
+            {
+                ReportGlow(new EdgeGlow { Active = false });
+                _lastGlowActive = false;
+            }
             _log.Log("엣지 감시 중지");
         }
 
@@ -143,6 +162,9 @@ namespace LogiFlow.Handoff
             Screen screen = Screen.FromPoint(new Point(cursor.X, cursor.Y));
             string devName = screen != null ? screen.DeviceName : null;
 
+            Attach glowAt = null;
+            double glowProgress = 0;
+
             foreach (var at in _attachments)
             {
                 if (!string.Equals(at.MonitorDeviceName, devName, StringComparison.Ordinal))
@@ -162,12 +184,43 @@ namespace LogiFlow.Handoff
                     _log.Log(string.Format("엣지 전환 트리거: 모니터 {0} 변 {1} → 채널 {2}",
                         at.MonitorDeviceName, at.Edge, at.Channel + 1));
                     int channel = at.Channel;
+                    // 전환 순간 pop glow.
+                    ReportGlow(new EdgeGlow { Active = true, Fired = true, Monitor = at.Bounds, Edge = at.Edge, Progress = 1.0, Channel = at.Channel });
+                    _lastGlowActive = false;
                     // 다른 변의 dwell 도 리셋(중복 트리거 방지).
                     foreach (var other in _attachments) other.Detector.Reset(true);
                     if (_onTrigger != null) _onTrigger(channel);
                     return;
                 }
+
+                // glow: 변의 좁은 띠에 닿아(드래그 아님) progress 가 쌓이는 중인 변을 고른다.
+                int dist = EdgeDetector.DistanceFromEdge(at.Bounds, at.Edge, cursor.X, cursor.Y);
+                if (!buttonDown && dist <= EdgeDetector.DefaultBandPx)
+                {
+                    double p = at.Detector.Progress(now);
+                    if (glowAt == null || p >= glowProgress)
+                    {
+                        glowAt = at;
+                        glowProgress = p;
+                    }
+                }
             }
+
+            if (glowAt != null)
+            {
+                ReportGlow(new EdgeGlow { Active = true, Fired = false, Monitor = glowAt.Bounds, Edge = glowAt.Edge, Progress = glowProgress, Channel = glowAt.Channel });
+                _lastGlowActive = true;
+            }
+            else if (_lastGlowActive)
+            {
+                ReportGlow(new EdgeGlow { Active = false });
+                _lastGlowActive = false;
+            }
+        }
+
+        private void ReportGlow(EdgeGlow g)
+        {
+            if (_onGlow != null) _onGlow(g);
         }
 
         private void MaybeSample(Attach at, NativeMethods.POINT cursor, int push, long now)
