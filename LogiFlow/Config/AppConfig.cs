@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using LogiFlow.Handoff;
+using LogiFlow.Ui;
 
 namespace LogiFlow.Config
 {
@@ -23,7 +24,22 @@ namespace LogiFlow.Config
         public bool EdgeSwitchEnabled = true;    // 엣지 자동 전환 켬(기본). 배치 비면 아무 동작 없음.
         public int DwellMs = EdgeDetector.DefaultDwellMs;
         public bool AutoStart = true;
+        public bool DragGuard = true;            // 드래그 중 전환 안 함(디텍터가 buttonDown 무시).
+        public bool DiagLogEnabled = true;       // 진단 로그 남기기.
+        public bool PreLogon = false;            // 로그온 전에도 실행(고급·준비 중). 실제 서비스는 다음 판.
+        public ThemeMode Theme = ThemeMode.System;
         public readonly List<EdgeAttachment> Attachments = new List<EdgeAttachment>();
+        public readonly Dictionary<int, string> Aliases = new Dictionary<int, string>(); // 채널(0-base)→별칭
+
+        public string AliasFor(int channel)
+        {
+            string v;
+            if (Aliases.TryGetValue(channel, out v) && !string.IsNullOrEmpty(v))
+            {
+                return v;
+            }
+            return string.Format("채널 {0}", channel + 1);
+        }
 
         public static string ConfigDirectory
         {
@@ -66,6 +82,18 @@ namespace LogiFlow.Config
                                 cfg.DwellMs = d;
                             break;
                         case "autostart": cfg.AutoStart = val == "1"; break;
+                        case "dragGuard": cfg.DragGuard = val == "1"; break;
+                        case "diagLog": cfg.DiagLogEnabled = val == "1"; break;
+                        case "preLogon": cfg.PreLogon = val == "1"; break;
+                        case "theme":
+                            int tm;
+                            if (int.TryParse(val, out tm) && tm >= 0 && tm <= 2) cfg.Theme = (ThemeMode)tm;
+                            break;
+                        case "alias":
+                            string[] ap = val.Split('\t');
+                            int ac;
+                            if (ap.Length >= 2 && int.TryParse(ap[0], out ac)) cfg.Aliases[ac] = ap[1];
+                            break;
                         case "attach":
                             EdgeAttachment a = ParseAttach(val);
                             if (a != null) cfg.Attachments.Add(a);
@@ -107,6 +135,15 @@ namespace LogiFlow.Config
                 sb.AppendLine("edgeEnabled=" + (EdgeSwitchEnabled ? "1" : "0"));
                 sb.AppendLine("dwellMs=" + DwellMs.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("autostart=" + (AutoStart ? "1" : "0"));
+                sb.AppendLine("dragGuard=" + (DragGuard ? "1" : "0"));
+                sb.AppendLine("diagLog=" + (DiagLogEnabled ? "1" : "0"));
+                sb.AppendLine("preLogon=" + (PreLogon ? "1" : "0"));
+                sb.AppendLine("theme=" + ((int)Theme).ToString(CultureInfo.InvariantCulture));
+                foreach (var kv in Aliases)
+                {
+                    if (!string.IsNullOrEmpty(kv.Value))
+                        sb.AppendLine(string.Format("alias={0}\t{1}", kv.Key, kv.Value));
+                }
                 foreach (var a in Attachments)
                 {
                     sb.AppendLine(string.Format("attach={0}\t{1}\t{2}", a.Channel, a.MonitorDeviceName, (int)a.Edge));

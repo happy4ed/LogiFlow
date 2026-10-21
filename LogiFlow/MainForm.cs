@@ -3,391 +3,564 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
-using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using LogiFlow.Config;
 using LogiFlow.Diagnostics;
+using LogiFlow.Ui;
 
 namespace LogiFlow
 {
     /// <summary>
-    /// 설정 창(트레이에서 열림). 탭1: 진단·수동 전환, 탭2: 엣지 자동 전환 배치.
-    /// 창을 닫으면 트레이로 내려간다(앱은 계속 상주).
+    /// 승인 시안(사이드바 내비 + 전환 관리·설정·진단 3화면)의 WinForms 구현.
+    /// 창 크기는 페이지와 무관하게 고정(리사이즈·최소크기 허용), 내용이 많으면 스크롤.
     /// </summary>
     internal sealed class MainForm : Form
     {
+        private const int ContentW = 700;
+
         private readonly TrayAppContext _tray;
+        private AppConfig Config { get { return _tray.Config; } }
         private DiagLogger Log { get { return _tray.Log; } }
 
-        // 탭1
-        private CheckBox _showAllCheck;
-        private TextBox _output;
-        private Panel _transferPanel;
-
-        // 탭2
-        private MonitorLayoutPanel _canvas;
-        private CheckBox _edgeEnableCheck;
-        private NumericUpDown _dwellUpDown;
-        private CheckBox _autoStartCheck;
-
+        private Panel _sidebar;
+        private Panel _pageHost;
+        private NavButton _navSwitch, _navSettings, _navDiag;
+        private int _pageIndex;
         private bool _busy;
 
         public MainForm(TrayAppContext tray)
         {
             _tray = tray;
             BuildUi();
+            Theme.Changed += OnThemeChanged;
         }
 
         private void BuildUi()
         {
-            Text = "LogiFlow — 설정";
-            Width = 820;
-            Height = 680;
-            MinimumSize = new Size(640, 520);
+            Text = "LogiFlow";
+            Icon = AppIcon.Get();
             StartPosition = FormStartPosition.CenterScreen;
+            ClientSize = new Size(900, 600);
+            MinimumSize = new Size(780, 560);
             Font = new Font("Segoe UI", 9f);
-            ShowInTaskbar = true;
 
-            var tabs = new TabControl { Dock = DockStyle.Fill };
-            tabs.TabPages.Add(BuildDiagnosticsTab());
-            tabs.TabPages.Add(BuildEdgeTab());
-            Controls.Add(tabs);
+            _sidebar = new Panel { Dock = DockStyle.Left, Width = 182, Padding = new Padding(12, 14, 12, 12) };
+            BuildSidebar();
 
+            _pageHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+
+            Controls.Add(_pageHost);
+            Controls.Add(_sidebar);
+
+            ApplyChrome();
             FormClosing += OnFormClosing;
+            ShowPage(0);
         }
 
-        private TabPage BuildDiagnosticsTab()
+        private void BuildSidebar()
         {
-            var page = new TabPage("진단 · 수동 전환");
+            DisposeChildren(_sidebar);
+            Color sb = Theme.Sidebar;
 
-            var top = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(8) };
-            var refreshBtn = new Button { Text = "새로 고침", Width = 90, Height = 26, Left = 8, Top = 6 };
-            refreshBtn.Click += (s, e) => _tray.Rescan();
-            var logBtn = new Button { Text = "로그 폴더 열기", Width = 110, Height = 26, Left = 102, Top = 6 };
-            logBtn.Click += (s, e) => OpenLogFolder();
-            _showAllCheck = new CheckBox { Text = "모두 보기(진단)", Left = 222, Top = 10, AutoSize = true, Checked = false };
-            _showAllCheck.CheckedChanged += (s, e) => RenderResults();
-            top.Controls.Add(refreshBtn);
-            top.Controls.Add(logBtn);
-            top.Controls.Add(_showAllCheck);
+            var brand = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(4, 2, 4, 2), BackColor = sb };
+            var mark = new IconView(Icons.Mark, 18) { Left = 4, Top = 9, Tint = Theme.Accent };
+            var name = new Label { Text = "LogiFlow", Left = 30, Top = 8, AutoSize = true, Font = new Font("Segoe UI", 10f, FontStyle.Bold), ForeColor = Theme.Ink };
+            brand.Controls.Add(mark);
+            brand.Controls.Add(name);
 
-            _transferPanel = new Panel { Dock = DockStyle.Bottom, Height = 190, Padding = new Padding(8), BorderStyle = BorderStyle.FixedSingle, AutoScroll = true };
+            _navSwitch = MakeNav("전환 관리", Icons.Swap, 0);
+            _navSettings = MakeNav("설정", Icons.Gear, 1);
+            _navDiag = MakeNav("진단", Icons.Diag, 2);
 
-            _output = new TextBox
+            var navHost = new Panel { Dock = DockStyle.Top, Height = 3 * 36 + 2 * 4 + 8, Padding = new Padding(0, 8, 0, 0), BackColor = sb };
+            _navDiag.Dock = DockStyle.Top; _navDiag.Height = 36;
+            _navSettings.Dock = DockStyle.Top; _navSettings.Height = 36;
+            _navSwitch.Dock = DockStyle.Top; _navSwitch.Height = 36;
+            navHost.Controls.Add(_navDiag);
+            navHost.Controls.Add(MakeGap(4));
+            navHost.Controls.Add(_navSettings);
+            navHost.Controls.Add(MakeGap(4));
+            navHost.Controls.Add(_navSwitch);
+
+            var status = new Panel { Dock = DockStyle.Bottom, Height = 32, BackColor = sb };
+            var plug = new IconView(Icons.Plug, 16) { Left = 6, Top = 8, Tint = Theme.Muted };
+            var dot = new IconView((g, r, c) => { using (var b = new SolidBrush(Theme.Ok)) g.FillEllipse(b, r.X, r.Y + r.Height / 2 - 3.5f, 7, 7); }, 16) { Left = 26, Top = 8 };
+            var slabel = new Label { Text = "LogiFlow 실행 중", Left = 42, Top = 7, AutoSize = true, ForeColor = Theme.Muted, Font = new Font("Segoe UI", 8.5f) };
+            status.Controls.Add(plug);
+            status.Controls.Add(dot);
+            status.Controls.Add(slabel);
+
+            _sidebar.Controls.Add(navHost);
+            _sidebar.Controls.Add(status);
+            _sidebar.Controls.Add(brand);
+
+            UpdateNavActive();
+        }
+
+        private NavButton MakeNav(string text, IconPaint icon, int index)
+        {
+            var nav = new NavButton(text, icon) { Font = new Font("Segoe UI", 9.5f) };
+            nav.Selected += (s, e) => ShowPage(index);
+            return nav;
+        }
+
+        private static Panel MakeGap(int h)
+        {
+            return new Panel { Dock = DockStyle.Top, Height = h, BackColor = Theme.Sidebar };
+        }
+
+        private void UpdateNavActive()
+        {
+            if (_navSwitch == null) return;
+            _navSwitch.Active = _pageIndex == 0;
+            _navSettings.Active = _pageIndex == 1;
+            _navDiag.Active = _pageIndex == 2;
+        }
+
+        private void ApplyChrome()
+        {
+            BackColor = Theme.Content;
+            if (_sidebar != null) _sidebar.BackColor = Theme.Sidebar;
+            if (_pageHost != null) _pageHost.BackColor = Theme.Content;
+        }
+
+        private void OnThemeChanged(object s, EventArgs e)
+        {
+            if (IsDisposed) return;
+            ApplyChrome();
+            BuildSidebar();
+            ShowPage(_pageIndex);
+        }
+
+        private static void DisposeChildren(Control host)
+        {
+            var old = new List<Control>();
+            foreach (Control c in host.Controls) old.Add(c);
+            host.Controls.Clear();
+            foreach (Control c in old) c.Dispose();
+        }
+
+        public void ShowPage(int index)
+        {
+            _pageIndex = index;
+            UpdateNavActive();
+            DisposeChildren(_pageHost);
+            Panel page;
+            switch (index)
             {
-                Dock = DockStyle.Fill,
-                Multiline = true,
-                ReadOnly = true,
-                ScrollBars = ScrollBars.Both,
-                WordWrap = false,
-                Font = new Font("Consolas", 9.5f),
-                BackColor = Color.White,
-            };
-
-            page.Controls.Add(_output);
-            page.Controls.Add(top);
-            page.Controls.Add(_transferPanel);
-            return page;
-        }
-
-        private TabPage BuildEdgeTab()
-        {
-            var page = new TabPage("엣지 자동 전환");
-
-            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 132, Padding = new Padding(10) };
-
-            _edgeEnableCheck = new CheckBox { Text = "엣지 자동 전환 사용", Left = 10, Top = 8, AutoSize = true, Checked = _tray.Config.EdgeSwitchEnabled };
-
-            var dwellLabel = new Label { Text = "엣지 유지(ms):", Left = 10, Top = 36, AutoSize = true };
-            _dwellUpDown = new NumericUpDown { Left = 110, Top = 32, Width = 70, Minimum = 100, Maximum = 2000, Increment = 10, Value = Clamp(_tray.Config.DwellMs, 100, 2000) };
-
-            _autoStartCheck = new CheckBox { Text = "로그인 시 자동 시작", Left = 10, Top = 62, AutoSize = true, Checked = _tray.Config.AutoStart };
-
-            var warn = new Label
-            {
-                Left = 10, Top = 88, Width = 560, Height = 34,
-                ForeColor = Color.FromArgb(176, 0, 32),
-                Text = "엣지에 닿으면 마우스·키보드가 그 채널 PC 로 넘어갑니다. 돌아오려면 그 PC 에서 "
-                     + "채널 1 을 누르거나 기기의 Easy-Switch 버튼을 쓰세요(이 PC 는 기기가 떠나 명령을 보낼 수 없음).",
-            };
-
-            var saveBtn = new Button { Text = "저장", Left = 600, Top = 60, Width = 90, Height = 30 };
-            saveBtn.Click += (s, e) => SaveEdgeConfig();
-
-            bottom.Controls.Add(_edgeEnableCheck);
-            bottom.Controls.Add(dwellLabel);
-            bottom.Controls.Add(_dwellUpDown);
-            bottom.Controls.Add(_autoStartCheck);
-            bottom.Controls.Add(warn);
-            bottom.Controls.Add(saveBtn);
-
-            _canvas = new MonitorLayoutPanel { Dock = DockStyle.Fill };
-
-            page.Controls.Add(_canvas);
-            page.Controls.Add(bottom);
-            return page;
-        }
-
-        private static int Clamp(int v, int lo, int hi)
-        {
-            if (v < lo) return lo;
-            if (v > hi) return hi;
-            return v;
-        }
-
-        public void ShowSettings()
-        {
-            if (!Visible)
-            {
-                Show();
+                case 1: page = BuildSettingsPage(); break;
+                case 2: page = BuildDiagPage(); break;
+                default: page = BuildSwitchPage(); break;
             }
-            if (WindowState == FormWindowState.Minimized)
-            {
-                WindowState = FormWindowState.Normal;
-            }
-            Activate();
-            BringToFront();
-            OnStateUpdated();
+            page.Location = new Point(0, 0);
+            _pageHost.Controls.Add(page);
         }
 
-        private void OnFormClosing(object sender, FormClosingEventArgs e)
+        // ---- 공통 빌더 ----
+        private Label Title(string text)
         {
-            // 사용자가 X 로 닫으면 종료하지 않고 트레이로 내려간다.
-            if (e.CloseReason == CloseReason.UserClosing)
-            {
-                e.Cancel = true;
-                Hide();
-            }
+            return new Label { Text = text, AutoSize = true, Font = new Font("Segoe UI", 14f, FontStyle.Bold), ForeColor = Theme.Ink };
         }
 
-        /// <summary>트레이에서 스캔/상태 갱신 시 호출. 목록·캔버스 새로 그림.</summary>
-        public void OnStateUpdated()
+        private Label Sub(string text)
         {
-            RenderResults();
-            RefreshCanvas();
+            return new Label { Text = text, AutoSize = true, Font = new Font("Segoe UI", 9f), ForeColor = Theme.Muted };
         }
 
-        private void RefreshCanvas()
+        private Label SectionLabel(string text, string small)
         {
-            if (_canvas == null) return;
+            var l = new Label { AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), ForeColor = Theme.Ink };
+            l.Text = small != null ? text + "   " + small : text;
+            return l;
+        }
+
+        private Label GroupHead(string text)
+        {
+            return new Label { Text = text.ToUpper(), AutoSize = true, Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = Theme.Muted };
+        }
+
+        private Panel Card(int x, int y, int w, int h)
+        {
+            var p = new ThemedCard { Left = x, Top = y, Width = w, Height = h };
+            return p;
+        }
+
+        // ---- 전환 관리 ----
+        private Panel BuildSwitchPage()
+        {
+            var page = new Panel { Width = ContentW + 48, Padding = new Padding(24, 20, 24, 20), BackColor = Theme.Content };
+            int W = ContentW;
+            int y = 20;
+
+            var title = Title("전환 관리"); title.Location = new Point(24, y); page.Controls.Add(title);
+            var sub = Sub("화면 끝으로 밀면 자동 전환 · 떨어뜨리면 수동"); sub.Location = new Point(24, y + 28); page.Controls.Add(sub);
+            var refresh = new ThemedButton { Variant = ButtonVariant.Icon, Icon = Icons.Refresh, Width = 32, Height = 30, Left = 24 + W - 32, Top = y }; refresh.Click += (s, e) => _tray.Rescan();
+            page.Controls.Add(refresh);
+            y += 58;
+
+            var canvas = new MonitorLayoutPanel { Left = 24, Top = y, Width = W, Height = 240 };
             int maxHost = _tray.MaxHostCount();
             int current = _tray.CurrentChannel();
             var channels = new List<int>();
-            for (int h = 0; h < maxHost; h++)
+            for (int h = 0; h < maxHost; h++) if (h != current) channels.Add(h);
+            canvas.SetData(channels, current, Config.Attachments, Config.AliasFor);
+            canvas.AttachmentsChanged += (s, e) =>
             {
-                if (h != current)
-                {
-                    channels.Add(h);
-                }
+                Config.Attachments.Clear();
+                Config.Attachments.AddRange(canvas.GetAttachments());
+                _tray.ApplyConfig();
+            };
+            page.Controls.Add(canvas);
+            y += 240 + 14;
+
+            // 채널 별칭
+            var aliasLbl = SectionLabel("채널 별칭", "엣지에 둘 다른 PC 를 알아보기 쉽게"); aliasLbl.Location = new Point(24, y); page.Controls.Add(aliasLbl);
+            y += 24;
+            int ax = 24;
+            int aliasCount = Math.Max(maxHost, 1);
+            for (int ch = 0; ch < aliasCount; ch++)
+            {
+                int channel = ch;
+                var chip = BuildAliasChip(channel);
+                chip.Location = new Point(ax, y);
+                page.Controls.Add(chip);
+                ax += chip.Width + 8;
             }
-            _canvas.SetData(channels, current, _tray.Config.Attachments);
+            y += 42;
+
+            // 등록된 기기
+            var devices = _tray.Switchable();
+            var devLbl = SectionLabel("등록된 기기", devices.Count + "개"); devLbl.Location = new Point(24, y); page.Controls.Add(devLbl);
+            y += 26;
+            if (devices.Count == 0)
+            {
+                var none = new Label { Text = "전환 가능한 기기가 없습니다. [진단]에서 새로 고침 하세요.", AutoSize = true, ForeColor = Theme.Muted, Location = new Point(24, y) };
+                page.Controls.Add(none);
+                y += 28;
+            }
+            foreach (var d in devices)
+            {
+                var row = BuildDeviceRow(d, W);
+                row.Location = new Point(24, y);
+                page.Controls.Add(row);
+                y += row.Height;
+            }
+            y += 8;
+
+            // footer
+            var foot = BuildSwitchFooter(W, canvas);
+            foot.Location = new Point(24, y);
+            page.Controls.Add(foot);
+            y += foot.Height + 20;
+
+            page.Height = y;
+            return page;
         }
 
-        private void SaveEdgeConfig()
+        private Panel BuildAliasChip(int channel)
         {
-            _tray.Config.EdgeSwitchEnabled = _edgeEnableCheck.Checked;
-            _tray.Config.DwellMs = (int)_dwellUpDown.Value;
-            _tray.Config.AutoStart = _autoStartCheck.Checked;
-            _tray.Config.Attachments.Clear();
-            _tray.Config.Attachments.AddRange(_canvas.GetAttachments());
+            var chip = new ThemedCard { Height = 30, Padding = new Padding(8, 0, 8, 0) };
+            var cn = new Label { Text = "채널 " + (channel + 1), AutoSize = true, Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = Theme.Accent, Top = 7, Left = 8 };
+            var al = new Label { Text = Config.AliasFor(channel), AutoSize = true, Font = new Font("Segoe UI", 8.5f), ForeColor = Theme.Ink, Top = 7 };
+            al.Left = cn.Right + 8;
+            var pen = new ThemedButton { Variant = ButtonVariant.Icon, Icon = Icons.Pencil, Width = 24, Height = 22, Top = 4 };
+            pen.Left = al.Right + 6;
+            pen.Click += (s, e) => EditAlias(channel);
+            chip.Controls.Add(cn); chip.Controls.Add(al); chip.Controls.Add(pen);
+            chip.Width = pen.Right + 8;
+            // 칩 클릭도 편집.
+            al.Click += (s, e) => EditAlias(channel);
+            return chip;
+        }
+
+        private void EditAlias(int channel)
+        {
+            string cur = Config.AliasFor(channel);
+            string v = Prompt.Show(this, "채널 별칭", string.Format("채널 {0} 의 별칭", channel + 1), cur);
+            if (v == null) return;
+            if (v.Length == 0) Config.Aliases.Remove(channel);
+            else Config.Aliases[channel] = v;
             _tray.ApplyConfig();
-            MessageBox.Show(this,
-                string.Format("저장했습니다. 엣지 배치 {0}개.\r\n엣지 자동 전환: {1}",
-                    _tray.Config.Attachments.Count, _edgeEnableCheck.Checked ? "켬" : "끔"),
-                "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ShowPage(0);
         }
 
-        // ---- 진단·전환 탭 ----
-
-        private List<ScanResult> Switchable()
+        private Panel BuildDeviceRow(ScanResult d, int w)
         {
-            return _tray.Switchable();
+            var row = new Panel { Width = w, Height = 44, BackColor = Theme.Content };
+            bool isKeyboard = d.DeviceName != null && d.DeviceName.IndexOf("keyboard", StringComparison.OrdinalIgnoreCase) >= 0
+                || (d.DeviceName != null && (d.DeviceName.IndexOf("Mechanical", StringComparison.OrdinalIgnoreCase) >= 0 || d.DeviceName.IndexOf("Keys", StringComparison.OrdinalIgnoreCase) >= 0));
+            var icon = new IconView(isKeyboard ? (IconPaint)Icons.Keyboard : Icons.Mouse, 18) { Left = 2, Top = 13, Tint = Theme.Muted };
+            var name = new Label { Text = d.DeviceName, AutoSize = true, Font = new Font("Segoe UI", 9.5f), ForeColor = Theme.Ink, Left = 30, Top = 13 };
+
+            string chText = d.CurrentHost >= 0 ? Config.AliasFor(d.CurrentHost) : "?";
+            var badge = new ThemedBadge { Text = "채널 " + (d.CurrentHost >= 0 ? (d.CurrentHost + 1).ToString() : "?"), Left = w - 220, Top = 10, Height = 24, AutoWidth = true };
+
+            var switchBtn = new ThemedButton { Text = "전환", Width = 64, Height = 26, Left = w - 72, Top = 9 };
+            switchBtn.Click += (s, e) => ShowDeviceSwitchMenu(d, switchBtn);
+
+            row.Controls.Add(icon); row.Controls.Add(name); row.Controls.Add(badge); row.Controls.Add(switchBtn);
+            var sep = new Panel { Left = 0, Top = 43, Width = w, Height = 1, BackColor = Theme.Divider };
+            row.Controls.Add(sep);
+            return row;
         }
 
-        private void RenderResults()
+        private void ShowDeviceSwitchMenu(ScanResult d, Control anchor)
         {
-            if (_output == null) return;
-            bool showAll = _showAllCheck.Checked;
-            var shown = new List<ScanResult>();
-            foreach (var r in _tray.LastResults)
+            var menu = new ContextMenuStrip();
+            int hosts = d.HostCount > 0 ? d.HostCount : _tray.MaxHostCount();
+            for (int h = 0; h < hosts; h++)
             {
-                if (showAll || r.ChangeHostSupported)
-                {
-                    shown.Add(r);
-                }
+                if (h == d.CurrentHost) continue;
+                int target = h;
+                var item = new ToolStripMenuItem(string.Format("채널 {0} · {1}", h + 1, Config.AliasFor(h)));
+                item.Click += (s, e) => DoSwitchOne(d, target);
+                menu.Items.Add(item);
             }
-            _output.Text = FormatReport(shown, _tray.LastResults.Count, showAll);
-            BuildTransferPanel();
+            if (menu.Items.Count == 0) menu.Items.Add(new ToolStripMenuItem("전환할 다른 채널 없음") { Enabled = false });
+            menu.Show(anchor, new Point(0, anchor.Height));
         }
 
-        private static string FormatReport(List<ScanResult> shown, int totalCount, bool showAll)
+        private Panel BuildSwitchFooter(int w, MonitorLayoutPanel canvas)
         {
-            var sb = new StringBuilder();
-            sb.AppendLine("LogiFlow HID++ 진단 결과");
-            sb.AppendLine(new string('=', 60));
-            sb.AppendLine(showAll
-                ? string.Format("전체 응답 장치: {0}개 (진단 모드)", totalCount)
-                : string.Format("전환 가능 장치: {0}개  (전체 {1}개 중 · 빈 슬롯/리시버 숨김)", shown.Count, totalCount));
-            sb.AppendLine();
+            var foot = new Panel { Width = w, Height = 86, BackColor = Theme.Content };
+            var top = new Panel { Left = 0, Top = 0, Width = w, Height = 1, BackColor = Theme.Divider };
+            foot.Controls.Add(top);
 
+            var edgeIcon = new IconView(Icons.Edge, 16) { Left = 0, Top = 16, Tint = Theme.Muted };
+            var edgeLbl = new Label { Text = "가장자리 자동 전환", AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), ForeColor = Theme.Ink, Left = 24, Top = 15 };
+
+            var dwellLbl = new Label { Text = "대기", AutoSize = true, ForeColor = Theme.Muted, Font = new Font("Segoe UI", 8.5f), Top = 18 };
+            var dwellBtn = new ThemedButton { Text = DwellText(Config.DwellMs), Icon = null, Width = 78, Height = 26, Top = 14 };
+            dwellBtn.Click += (s, e) => ShowDwellMenu(dwellBtn);
+            var edgeToggle = new ThemedToggle { Checked = Config.EdgeSwitchEnabled, Top = 20 };
+            edgeToggle.CheckedChanged += (s, e) => { Config.EdgeSwitchEnabled = edgeToggle.Checked; _tray.ApplyConfig(); };
+
+            edgeToggle.Left = w - 28; dwellBtn.Left = edgeToggle.Left - 86; dwellLbl.Left = dwellBtn.Left - 30;
+            foot.Controls.Add(edgeIcon); foot.Controls.Add(edgeLbl); foot.Controls.Add(dwellLbl); foot.Controls.Add(dwellBtn); foot.Controls.Add(edgeToggle);
+
+            var guardChk = new ThemedToggle { Checked = Config.DragGuard, Top = 54 };
+            var guardLbl = new Label { Text = "드래그 중 전환 안 함", AutoSize = true, ForeColor = Theme.Ink, Font = new Font("Segoe UI", 8.5f), Left = 34, Top = 56 };
+            guardChk.Left = 0;
+            guardChk.CheckedChanged += (s, e) => { Config.DragGuard = guardChk.Checked; _tray.ApplyConfig(); };
+
+            var reset = new ThemedButton { Variant = ButtonVariant.Ghost, Text = "배치 초기화", Width = 90, Height = 26, Top = 54 };
+            reset.Left = w - 90;
+            reset.Click += (s, e) => { canvas.ClearPlacements(); };
+            foot.Controls.Add(guardChk); foot.Controls.Add(guardLbl); foot.Controls.Add(reset);
+            return foot;
+        }
+
+        private static string DwellText(int ms)
+        {
+            return (ms / 1000.0).ToString("0.##") + "초";
+        }
+
+        private void ShowDwellMenu(Control anchor)
+        {
+            var menu = new ContextMenuStrip();
+            int[] opts = { 200, 330, 500, 800, 1000 };
+            foreach (int ms in opts)
+            {
+                int v = ms;
+                var item = new ToolStripMenuItem(DwellText(ms));
+                item.Click += (s, e) => { Config.DwellMs = v; _tray.ApplyConfig(); ShowPage(0); };
+                menu.Items.Add(item);
+            }
+            menu.Show(anchor, new Point(0, anchor.Height));
+        }
+
+        // ---- 설정 ----
+        private Panel BuildSettingsPage()
+        {
+            var page = new Panel { Width = ContentW + 48, BackColor = Theme.Content };
+            int W = ContentW;
+            int y = 20;
+            var title = Title("설정"); title.Location = new Point(24, y); page.Controls.Add(title);
+            var sub = Sub("실행과 로그를 관리"); sub.Location = new Point(24, y + 28); page.Controls.Add(sub);
+            y += 60;
+
+            var g1 = GroupHead("테마"); g1.Location = new Point(24, y); page.Controls.Add(g1); y += 22;
+            var themeCard = Card(24, y, W, 56);
+            var seg = new SegmentedControl { Left = W - 230, Top = 13, Width = 216, Height = 30 };
+            seg.SetItems(new[] { "시스템", "라이트", "다크" }, (int)Config.Theme);
+            seg.SelectedChanged += (s, e) =>
+            {
+                Config.Theme = (ThemeMode)seg.SelectedIndex;
+                Theme.SetMode(Config.Theme);
+                _tray.ApplyConfig();
+            };
+            themeCard.Controls.Add(MakeRowLabel("테마", "시스템 설정을 따르거나 라이트·다크로 고정합니다.", 14));
+            themeCard.Controls.Add(seg);
+            page.Controls.Add(themeCard);
+            y += 56 + 16;
+
+            var g2 = GroupHead("실행"); g2.Location = new Point(24, y); page.Controls.Add(g2); y += 22;
+            var runCard = Card(24, y, W, 2 * 60);
+            AddSettingRow(runCard, 0, "Windows 시작 시 실행", "로그인하면 트레이에 자동으로 상주합니다.", false,
+                Config.AutoStart, (on) => { Config.AutoStart = on; _tray.ApplyConfig(); });
+            AddSettingRow(runCard, 60, "로그온 전에도 실행", "잠금 화면·로그인 전에도 전환이 동작합니다. 서비스 설치가 필요합니다.", true,
+                Config.PreLogon, (on) =>
+                {
+                    Config.PreLogon = on;
+                    _tray.ApplyConfig();
+                    if (on) MessageBox.Show(this, "로그온 전 실행(서비스)은 준비 중입니다. 다음 판에서 제공됩니다.", "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                });
+            page.Controls.Add(runCard);
+            y += 2 * 60 + 16;
+
+            var g3 = GroupHead("전환 · 진단"); g3.Location = new Point(24, y); page.Controls.Add(g3); y += 22;
+            var swCard = Card(24, y, W, 2 * 60);
+            AddSettingRow(swCard, 0, "가장자리 자동 전환 사용", "모니터 변에 붙인 채널로 커서를 밀면 자동 전환합니다.", false,
+                Config.EdgeSwitchEnabled, (on) => { Config.EdgeSwitchEnabled = on; _tray.ApplyConfig(); });
+            AddSettingRow(swCard, 60, "진단 로그 남기기", "엣지 판정·전환 트리거를 로그 폴더에 기록합니다.", false,
+                Config.DiagLogEnabled, (on) => { Config.DiagLogEnabled = on; Log.Enabled = on; _tray.ApplyConfig(); });
+            page.Controls.Add(swCard);
+            y += 2 * 60 + 20;
+
+            page.Height = y;
+            return page;
+        }
+
+        private Control MakeRowLabel(string lab, string desc, int top)
+        {
+            var p = new Panel { Left = 16, Top = top, Width = 420, Height = 40, BackColor = Theme.Section };
+            var l1 = new Label { Text = lab, AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), ForeColor = Theme.Ink, Left = 0, Top = 0 };
+            var l2 = new Label { Text = desc, AutoSize = false, Font = new Font("Segoe UI", 8.5f), ForeColor = Theme.Muted, Left = 0, Top = 19, Width = 440, Height = 18 };
+            p.Controls.Add(l1); p.Controls.Add(l2);
+            return p;
+        }
+
+        private void AddSettingRow(Panel card, int top, string lab, string desc, bool advanced, bool on, Action<bool> onChange)
+        {
+            var row = new Panel { Left = 0, Top = top, Width = card.Width, Height = 60, BackColor = Theme.Section };
+            var l1 = new Label { Text = lab, AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), ForeColor = Theme.Ink, Left = 16, Top = 12 };
+            row.Controls.Add(l1);
+            if (advanced)
+            {
+                var adv = new ThemedBadge { Text = "고급", Left = l1.Right + 8, Top = 11, Height = 18, AutoWidth = true, UseAccent = true };
+                row.Controls.Add(adv);
+            }
+            var l2 = new Label { Text = desc, AutoSize = false, Font = new Font("Segoe UI", 8.5f), ForeColor = Theme.Muted, Left = 16, Top = 32, Width = card.Width - 90, Height = 18 };
+            row.Controls.Add(l2);
+            var tg = new ThemedToggle { Checked = on, Left = card.Width - 44, Top = 22 };
+            tg.CheckedChanged += (s, e) => onChange(tg.Checked);
+            row.Controls.Add(tg);
+            if (top > 0)
+            {
+                var sep = new Panel { Left = 16, Top = 0, Width = card.Width - 32, Height = 1, BackColor = Theme.Divider };
+                row.Controls.Add(sep);
+            }
+            card.Controls.Add(row);
+        }
+
+        // ---- 진단 ----
+        private Panel BuildDiagPage()
+        {
+            var page = new Panel { Width = ContentW + 48, BackColor = Theme.Content };
+            int W = ContentW;
+            int y = 20;
+            var title = Title("진단"); title.Location = new Point(24, y); page.Controls.Add(title);
+            var sub = Sub("기기별 채널·전환 인덱스 확인"); sub.Location = new Point(24, y + 28); page.Controls.Add(sub);
+
+            var showAll = new ThemedToggle { Checked = _showAllDiag, Top = y + 4 };
+            var showAllLbl = new Label { Text = "모두 보기", AutoSize = true, ForeColor = Theme.Ink, Font = new Font("Segoe UI", 8.5f), Top = y + 6 };
+            var refreshBtn = new ThemedButton { Text = "새로 고침", Icon = Icons.Refresh, Width = 104, Height = 28, Top = y };
+            var logBtn = new ThemedButton { Text = "로그 폴더 열기", Icon = Icons.Folder, Width = 128, Height = 28, Top = y };
+            logBtn.Left = 24 + W - 128; refreshBtn.Left = logBtn.Left - 112; showAll.Left = refreshBtn.Left - 40; showAllLbl.Left = showAll.Left - 56;
+            showAll.CheckedChanged += (s, e) => { _showAllDiag = showAll.Checked; ShowPage(2); };
+            refreshBtn.Click += (s, e) => _tray.Rescan();
+            logBtn.Click += (s, e) => OpenLogFolder();
+            page.Controls.Add(showAllLbl); page.Controls.Add(showAll); page.Controls.Add(refreshBtn); page.Controls.Add(logBtn);
+            y += 58;
+
+            var all = _tray.LastResults;
+            var shown = new List<ScanResult>();
+            foreach (var r in all) if (_showAllDiag || r.ChangeHostSupported) shown.Add(r);
+            int switchableCount = _tray.Switchable().Count;
+
+            var secLbl = SectionLabel("스캔된 기기", "전환 가능 " + switchableCount + "개"); secLbl.Location = new Point(24, y); page.Controls.Add(secLbl);
+            y += 24;
+
+            // header
+            var head = BuildDiagHeader(W); head.Location = new Point(24, y); page.Controls.Add(head); y += 28;
             if (shown.Count == 0)
             {
-                sb.AppendLine("표시할 장치가 없습니다. 기기 연결 확인 후 [새로 고침].");
-                return sb.ToString();
+                var none = new Label { Text = "표시할 기기가 없습니다. [새로 고침] 하세요.", AutoSize = true, ForeColor = Theme.Muted, Location = new Point(24, y) };
+                page.Controls.Add(none); y += 30;
             }
-
-            int n = 0;
             foreach (var r in shown)
             {
-                n++;
-                sb.AppendLine(string.Format("[{0}] {1}", n, r.DeviceName));
-                sb.AppendLine(string.Format("    VID:PID       {0}", r.VidPid));
-                sb.AppendLine(string.Format("    연결 방식      {0}", r.ConnectionType));
-                sb.AppendLine(string.Format("    deviceIndex   0x{0:X2}", r.DeviceIndex));
-                if (r.ChangeHostSupported)
-                {
-                    sb.AppendLine(string.Format("    0x1814 인덱스  0x{0:X2}", r.ChangeHostIndex));
-                    if (r.HostCount >= 0)
-                    {
-                        sb.AppendLine(string.Format("    호스트 개수    {0}", r.HostCount));
-                        sb.AppendLine(string.Format("    현재 채널      {0}  (채널 {1})", r.CurrentHost, r.CurrentHost + 1));
-                    }
-                }
-                else
-                {
-                    sb.AppendLine("    0x1814 인덱스  미지원");
-                }
-                if (!string.IsNullOrEmpty(r.Note))
-                {
-                    sb.AppendLine(string.Format("    비고          {0}", r.Note));
-                }
-                sb.AppendLine();
+                var row = BuildDiagRow(r, W); row.Location = new Point(24, y); page.Controls.Add(row); y += 40;
             }
-            return sb.ToString();
+            y += 6;
+
+            var noteIcon = new IconView(Icons.Plug, 14) { Left = 24, Top = y + 1, Tint = Theme.Muted };
+            var note = new Label { Text = "기기 정보는 저장되어 매번 재검색하지 않음 · \"모두 보기\"를 켜면 빈 슬롯·리시버도 함께 표시", AutoSize = true, ForeColor = Theme.Muted, Font = new Font("Segoe UI", 8.5f), Left = 44, Top = y };
+            page.Controls.Add(noteIcon); page.Controls.Add(note);
+            y += 40;
+
+            page.Height = y;
+            return page;
         }
 
-        private void BuildTransferPanel()
+        private bool _showAllDiag;
+
+        private Panel BuildDiagHeader(int w)
         {
-            _transferPanel.Controls.Clear();
-            var switchable = Switchable();
-            if (switchable.Count == 0)
-            {
-                _transferPanel.Controls.Add(new Label { AutoSize = true, Left = 8, Top = 8, Text = "전환 가능한 기기가 없습니다. (0x1814 지원 기기 미탐지)" });
-                return;
-            }
-
-            int maxHost = _tray.MaxHostCount();
-            int y = 6;
-
-            _transferPanel.Controls.Add(new Label
-            {
-                AutoSize = true, Left = 6, Top = y, Font = new Font(Font, FontStyle.Bold),
-                Text = string.Format("수동 전환 — 전환 가능 기기 {0}개", switchable.Count),
-            });
-            y += 22;
-
-            _transferPanel.Controls.Add(new Label
-            {
-                AutoSize = false, Left = 6, Top = y, Width = 740, Height = 30,
-                ForeColor = Color.FromArgb(176, 0, 32),
-                Text = "누르면 마우스·키보드가 해당 PC 로 넘어갑니다. 돌아오려면 그 PC 에서 채널 1 또는 Easy-Switch 버튼.",
-            });
-            y += 34;
-
-            _transferPanel.Controls.Add(new Label { AutoSize = true, Left = 6, Top = y + 4, Text = "모두 함께:" });
-            int bx = 78;
-            for (int h = 0; h < maxHost; h++)
-            {
-                int target = h;
-                var b = new Button { Text = string.Format("채널 {0}로", h + 1), Width = 76, Height = 26, Left = bx, Top = y };
-                b.Click += (s, e) => DoSwitchAll(target);
-                _transferPanel.Controls.Add(b);
-                bx += 82;
-            }
-            y += 34;
-
-            foreach (var d in switchable)
-            {
-                string cur = d.CurrentHost >= 0 ? (d.CurrentHost + 1).ToString() : "?";
-                _transferPanel.Controls.Add(new Label
-                {
-                    AutoSize = true, Left = 6, Top = y + 4,
-                    Text = string.Format("{0}  (현재 채널 {1})", d.DeviceName, cur),
-                });
-                int dbx = 360;
-                int hosts = d.HostCount > 0 ? d.HostCount : maxHost;
-                for (int h = 0; h < hosts; h++)
-                {
-                    int target = h;
-                    ScanResult dev = d;
-                    var b = new Button { Text = (h + 1).ToString(), Width = 34, Height = 24, Left = dbx, Top = y };
-                    b.Click += (s, e) => DoSwitchOne(dev, target);
-                    _transferPanel.Controls.Add(b);
-                    dbx += 38;
-                }
-                y += 30;
-            }
-
-            foreach (Control c in _transferPanel.Controls)
-            {
-                if (c is Button) c.Enabled = !_busy;
-            }
+            var p = new Panel { Width = w, Height = 26, BackColor = Theme.Content };
+            AddCol(p, "기기", 0, (int)(w * 0.30));
+            AddCol(p, "VID:PID", (int)(w * 0.30), (int)(w * 0.18));
+            AddCol(p, "연결", (int)(w * 0.48), (int)(w * 0.22));
+            AddCol(p, "0x1814 인덱스", (int)(w * 0.70), (int)(w * 0.18));
+            AddCol(p, "채널", (int)(w * 0.88), (int)(w * 0.12));
+            var sep = new Panel { Left = 0, Top = 25, Width = w, Height = 1, BackColor = Theme.Divider };
+            p.Controls.Add(sep);
+            return p;
         }
 
-        private bool ConfirmSwitch(string what, int targetHost)
+        private void AddCol(Panel p, string text, int x, int wcol)
         {
-            return MessageBox.Show(this,
-                string.Format("{0} 를 채널 {1} 로 전환합니다.\r\n\r\n해당 PC 로 넘어가며 이 PC 에서는 기기가 사라집니다.\r\n진행할까요?",
-                    what, targetHost + 1),
-                "LogiFlow 전환 확인", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
+            p.Controls.Add(new Label { Text = text, AutoSize = false, Width = wcol, Height = 18, Left = x, Top = 4, Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = Theme.Muted });
         }
 
-        private void DoSwitchAll(int targetHost)
+        private Panel BuildDiagRow(ScanResult r, int w)
         {
-            if (_busy) return;
-            if (!ConfirmSwitch("전환 가능한 모든 기기", targetHost)) return;
-            RunSwitch(() =>
-            {
-                int sent = HostSwitcher.SwitchAll(Switchable(), targetHost, Log);
-                return string.Format("채널 {0}로 전체 전환: {1}개 전송", targetHost + 1, sent);
-            });
+            var p = new Panel { Width = w, Height = 40, BackColor = Theme.Content };
+            bool isKeyboard = r.DeviceName != null && (r.DeviceName.IndexOf("Mechanical", StringComparison.OrdinalIgnoreCase) >= 0 || r.DeviceName.IndexOf("Keys", StringComparison.OrdinalIgnoreCase) >= 0 || r.DeviceName.IndexOf("keyboard", StringComparison.OrdinalIgnoreCase) >= 0);
+            var icon = new IconView(isKeyboard ? (IconPaint)Icons.Keyboard : Icons.Mouse, 17) { Left = 0, Top = 11, Tint = Theme.Muted };
+            var name = new Label { Text = r.DeviceName, AutoSize = false, Width = (int)(w * 0.30) - 26, Height = 18, Left = 26, Top = 11, Font = new Font("Segoe UI", 9f), ForeColor = Theme.Ink };
+            p.Controls.Add(icon); p.Controls.Add(name);
+            p.Controls.Add(ColLabel(r.VidPid, (int)(w * 0.30), (int)(w * 0.18), Theme.Muted));
+            p.Controls.Add(ColLabel(r.ConnectionType, (int)(w * 0.48), (int)(w * 0.22), Theme.Ink));
+            p.Controls.Add(ColLabel(r.ChangeHostSupported ? string.Format("0x{0:X2}", r.ChangeHostIndex) : "미지원", (int)(w * 0.70), (int)(w * 0.18), Theme.Ink));
+            var badge = new ThemedBadge { Text = r.CurrentHost >= 0 ? "채널 " + (r.CurrentHost + 1) : "-", Left = (int)(w * 0.88), Top = 8, Height = 22, AutoWidth = true };
+            p.Controls.Add(badge);
+            var sep = new Panel { Left = 0, Top = 39, Width = w, Height = 1, BackColor = Theme.Divider };
+            p.Controls.Add(sep);
+            return p;
         }
 
+        private Label ColLabel(string text, int x, int wcol, Color c)
+        {
+            return new Label { Text = text, AutoSize = false, Width = wcol, Height = 18, Left = x, Top = 11, Font = new Font("Segoe UI", 9f), ForeColor = c };
+        }
+
+        // ---- 전환 동작 ----
         private void DoSwitchOne(ScanResult device, int targetHost)
         {
             if (_busy) return;
-            if (!ConfirmSwitch(device.DeviceName, targetHost)) return;
-            RunSwitch(() =>
+            if (MessageBox.Show(this, string.Format("{0} 를 채널 {1} ({2}) 로 전환합니다.\r\n이 PC 에서 기기가 사라집니다. 진행할까요?",
+                device.DeviceName, targetHost + 1, Config.AliasFor(targetHost)), "LogiFlow 전환",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            _busy = true;
+            var t = new Thread(() =>
             {
                 bool ok = HostSwitcher.SwitchOne(device, targetHost, Log);
-                return string.Format("{0} → 채널 {1}: {2}", device.DeviceName, targetHost + 1, ok ? "전송" : "실패(로그 확인)");
-            });
-        }
-
-        private void RunSwitch(Func<string> action)
-        {
-            _busy = true;
-            BuildTransferPanel();
-            var thread = new Thread(() =>
-            {
-                string msg;
-                try { msg = action(); }
-                catch (Exception ex) { msg = "전환 오류: " + ex.Message; Log.LogError("전환 오류: " + ex); }
-                try
-                {
-                    BeginInvoke(new Action(() =>
-                    {
-                        _busy = false;
-                        BuildTransferPanel();
-                        MessageBox.Show(this, msg + "\r\n\r\n전환된 기기는 이 PC 에서 사라집니다. [새로 고침] 으로 다시 읽을 수 있습니다.",
-                            "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }));
-                }
+                try { BeginInvoke((Action)(() => { _busy = false; MessageBox.Show(this, ok ? "전환 명령을 보냈습니다." : "전환 실패 — 로그를 확인하세요.", "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information); })); }
                 catch { _busy = false; }
             });
-            thread.IsBackground = true;
-            thread.Start();
+            t.IsBackground = true; t.Start();
         }
 
         private void OpenLogFolder()
@@ -399,9 +572,47 @@ namespace LogiFlow
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, "로그 폴더를 열지 못했습니다:\r\n" + ex.Message,
-                    "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "로그 폴더를 열지 못했습니다:\r\n" + ex.Message, "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+        }
+
+        public void ShowSettings()
+        {
+            if (!Visible) Show();
+            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            Activate(); BringToFront();
+            ShowPage(_pageIndex);
+        }
+
+        public void OnStateUpdated()
+        {
+            if (IsDisposed) return;
+            ShowPage(_pageIndex);
+        }
+
+        private void OnFormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                Hide();
+            }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            const int WM_DEVICECHANGE = 0x0219;
+            if (m.Msg == WM_DEVICECHANGE)
+            {
+                try { _tray.OnDeviceChanged(); } catch { }
+            }
+            base.WndProc(ref m);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) Theme.Changed -= OnThemeChanged;
+            base.Dispose(disposing);
         }
     }
 }

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="styles.css">
+<title>LogiFlow — 전환 관리</title>
+</head>
+<body>
+<div class="stage" id="stage"></div>
+<script src="icons.js"></script>
+<script src="chrome.js"></script>
+<script>
+/* Canvas: this-PC monitors labeled inside; other-PC channels drawn as
+   monitor-size rectangles (same scale) with labels outside.
+   contact = auto (blue) · detached = manual (dashed gray). */
+function canvas() {
+  return `<div class="canvas">
+    <div class="tag-ch1" style="left:55px;top:30px;">채널 1 · 이 노트북</div>
+
+    <div class="mon primary" style="left:55px;top:52px;width:132px;height:80px;">
+      <span class="mlabel">모니터 1</span><span class="msize">27인치</span>
+      <span class="pri-badge">주 모니터</span>
+    </div>
+    <div class="mon" style="left:187px;top:52px;width:132px;height:80px;">
+      <span class="mlabel">모니터 2</span><span class="msize">27인치</span>
+    </div>
+
+    <!-- Channel 2: desktop, attached to right edge of monitor 2 → auto -->
+    <div class="edge-hi" style="left:318px;top:52px;height:80px;"></div>
+    <div class="mon chan auto" style="left:319px;top:52px;width:132px;height:80px;">${ICON.monitor(22)}</div>
+    <div class="pclabel" style="left:319px;top:30px;">
+      <span class="nm">채널 2 · 데스크톱</span> <span class="md auto">· 자동</span></div>
+
+    <!-- Channel 3: office PC, detached → manual -->
+    <div class="mon chan manual" style="left:120px;top:158px;width:132px;height:74px;">${ICON.monitor(22)}</div>
+    <div class="pclabel" style="left:264px;top:184px;">
+      <div class="nm">채널 3 · 회사PC</div><div class="md manual">분리 · 수동</div></div>
+
+    <div class="legend" style="bottom:12px;">
+      <span class="lg"><span class="ln"></span>접촉: 자동</span>
+      <span class="lg"><span class="pt"></span>분리: 수동</span>
+    </div>
+  </div>`;
+}
+function aliasStrip() {
+  const chip = (cn, al) =>
+    `<div class="alias-chip"><span class="cn">${cn}</span><span class="al">${al}</span>${ICON.pencil(13)}</div>`;
+  return `<div class="section-label">채널 별칭 <small>엣지에 둘 다른 PC 를 알아보기 쉽게</small></div>
+    <div class="alias-row">
+      ${chip('채널 1','이 노트북')}${chip('채널 2','데스크톱')}${chip('채널 3','회사PC')}
+      <button class="btn ghost sm">${ICON.pencil(13)} 편집</button>
+    </div>`;
+}
+function deviceTable() {
+  const row = (ic, name, ch) => `<tr>
+    <td><div class="dev">${ICON[ic](17)}${name}</div></td>
+    <td><span class="badge" style="background:var(--chip);color:var(--muted)">채널 ${ch}</span></td>
+    <td class="right"><button class="btn sm">전환</button></td></tr>`;
+  return `<div class="section-label">등록된 기기 <small>2개</small></div>
+    <table class="tbl">
+      <thead><tr><th style="width:52%">기기</th><th>현재 채널</th><th class="right" style="width:120px">전환</th></tr></thead>
+      <tbody>${row('mouse','MX Master 4','1')}${row('keyboard','MX Mechanical','1')}</tbody>
+    </table>`;
+}
+function footer() {
+  return `<div class="footblock">
+    <div class="foot-row">
+      <div class="foot-left">${ICON.edge(16)} 가장자리 자동 전환</div>
+      <div class="foot-right">
+        <span class="small-muted">대기</span>
+        <div class="sel">0.33초 ${ICON.chevron(12)}</div>
+        <div class="toggle on"><span class="thumb"></span></div>
+      </div>
+    </div>
+    <div class="foot-row">
+      <div class="inline-opt"><span class="cbx on">${ICON.check(11)}</span> 드래그 중 전환 안 함</div>
+      <div class="foot-right">
+        <button class="btn ghost sm">배치 초기화</button>
+      </div>
+    </div>
+  </div>`;
+}
+function content() {
+  return `
+    <div class="page-head">
+      <div><div class="page-title">전환 관리</div>
+        <div class="page-sub">화면 끝으로 밀면 자동 전환 · 떨어뜨리면 수동</div></div>
+      <div class="head-actions">
+        <button class="btn icon">${ICON.refresh(15)}</button>
+      </div>
+    </div>
+    ${canvas()}
+    ${aliasStrip()}
+    ${deviceTable()}
+    ${footer()}
+  `;
+}
+mountPanes('switch', content);
+</script>
+</body>
+</html>

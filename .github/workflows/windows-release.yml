@@ -6,7 +6,8 @@ on:
     paths:
       - '.github/workflows/windows-release.yml'
       - 'LogiFlow/**'
-      - 'docs/RELEASE_NOTES_v0.3.0.md'
+      - 'build/windows/**'
+      - 'docs/RELEASE_NOTES_v0.4.0.md'
   workflow_dispatch:
     inputs:
       publish:
@@ -51,22 +52,41 @@ jobs:
         run: |
           dotnet msbuild LogiFlow/LogiFlow.csproj /t:Build /p:Configuration=Release /m:1 "/p:TargetFrameworkRootPath=$pwd/.build-tools/net462/build"
           if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
-      - name: Package release ZIP and checksums
+      - name: Stage, ZIP, installer and checksums
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           $dist = 'dist'
-          New-Item $dist -ItemType Directory -Force | Out-Null
+          New-Item "$dist/LogiFlow" -ItemType Directory -Force | Out-Null
+          # 실행에 필요한 산출물만 스테이징(설정/로그 제외).
+          Copy-Item 'LogiFlow/bin/Release/*' "$dist/LogiFlow" -Recurse -Force
+          Remove-Item "$dist/LogiFlow/*.pdb" -ErrorAction SilentlyContinue
           $zip = "$dist/LogiFlow-v$env:VERSION-win.zip"
-          Compress-Archive -Path 'LogiFlow/bin/Release/*' -DestinationPath $zip -Force
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  LogiFlow-v$env:VERSION-win.zip" | Set-Content "$dist/LogiFlow-v$env:VERSION-SHA256SUMS.txt" -Encoding utf8
+          Compress-Archive -Path "$dist/LogiFlow/*" -DestinationPath $zip -Force
+
+          # Inno Setup 설치파일 컴파일(러너 사전설치 경로 우선, 없으면 choco).
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc "/DAppVersion=$env:VERSION" "/DPackageDir=..\..\dist\LogiFlow" "/DOutputDir=..\..\dist" "build/windows/LogiFlow.iss"
+          if ($LASTEXITCODE -ne 0) { throw 'Installer compile failed' }
+
+          $setup = "LogiFlow-v$env:VERSION-setup.exe"
+          $zipName = "LogiFlow-v$env:VERSION-win.zip"
+          $lines = foreach ($name in @($zipName, $setup)) {
+            $h = (Get-FileHash "$dist/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$h  $name"
+          }
+          $lines | Set-Content "$dist/LogiFlow-v$env:VERSION-SHA256SUMS.txt" -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
           name: LogiFlow-Windows-${{ steps.version.outputs.version }}
           path: |
             dist/LogiFlow-v*-win.zip
+            dist/LogiFlow-v*-setup.exe
             dist/LogiFlow-v*-SHA256SUMS.txt
           if-no-files-found: error
           compression-level: 0
@@ -94,4 +114,4 @@ jobs:
           (cd release-assets && sha256sum --check "LogiFlow-v${VERSION}-SHA256SUMS.txt")
           gh release create "v${VERSION}" release-assets/* \
             --target "$COMMIT_SHA" --title "LogiFlow ${VERSION}" \
-            --notes-file docs/RELEASE_NOTES_v0.3.0.md --latest
+            --notes-file docs/RELEASE_NOTES_v0.4.0.md --latest

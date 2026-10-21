@@ -16,6 +16,9 @@ namespace LogiFlow.Diagnostics
         public string LogDirectory { get; private set; }
         public string LogPath { get; private set; }
 
+        /// <summary>진단 로그 남기기(설정). 꺼도 메모리 스냅샷은 유지.</summary>
+        public bool Enabled = true;
+
         public DiagLogger(string baseDirectory)
         {
             LogDirectory = Path.Combine(baseDirectory, "logs");
@@ -47,6 +50,10 @@ namespace LogiFlow.Diagnostics
             lock (_lock)
             {
                 _memory.AppendLine(stamped);
+                if (!Enabled)
+                {
+                    return; // 파일 기록 끔(메모리 사본만).
+                }
                 try
                 {
                     Directory.CreateDirectory(LogDirectory);

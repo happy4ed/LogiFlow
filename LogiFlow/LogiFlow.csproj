@@ -13,6 +13,7 @@
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Resources\logiflow.ico</ApplicationIcon>
     <LangVersion>7.3</LangVersion>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
@@ -64,11 +65,18 @@
     <Compile Include="Diagnostics\DiagLogger.cs" />
     <Compile Include="Diagnostics\ScanResult.cs" />
     <Compile Include="Diagnostics\DeviceScanner.cs" />
+    <Compile Include="Diagnostics\DeviceCache.cs" />
     <Compile Include="Diagnostics\HostSwitcher.cs" />
+    <Compile Include="Ui\Theme.cs" />
+    <Compile Include="Ui\Icons.cs" />
+    <Compile Include="Ui\ThemedControls.cs" />
+    <Compile Include="Ui\Prompt.cs" />
+    <Compile Include="Ui\AppIcon.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="app.manifest" />
+    <EmbeddedResource Include="Resources\logiflow.ico" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

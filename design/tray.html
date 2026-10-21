@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="styles.css">
+<title>LogiFlow — 트레이 메뉴</title>
+</head>
+<body>
+<div class="stage" id="stage"></div>
+<script src="icons.js"></script>
+<script>
+function scene() {
+  return `<div class="tray-scene" style="background:
+      radial-gradient(120% 90% at 20% 0%, color-mix(in srgb, var(--accent) 14%, var(--canvas-bg)), var(--canvas-bg));
+      border:1px solid var(--border); border-radius:12px; overflow:hidden; box-shadow:var(--shadow);">
+
+    <div class="tray-menu">
+      <div class="tray-head">채널 전환</div>
+      <div class="tray-item hl">${ICON.monitor(16)}<span>채널 2 · 데스크톱</span><span class="cn">2</span></div>
+      <div class="tray-item">${ICON.monitor(16)}<span>채널 3 · 회사PC</span><span class="cn">3</span></div>
+      <div class="tray-sep"></div>
+      <div class="tray-item">${ICON.gear(16)}<span>설정 열기</span></div>
+      <div class="tray-item danger">${ICON.power(16)}<span>종료</span></div>
+    </div>
+
+    <div class="taskbar">
+      <div class="tray-icon">${ICON.mark(17)}</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.2;text-align:right;">
+        오후 2:14<br>2026-10-21</div>
+    </div>
+  </div>`;
+}
+document.getElementById('stage').innerHTML =
+  `<div class="pane"><div class="theme-light">${scene()}</div><div class="pane-cap">라이트</div></div>
+   <div class="pane d"><div class="theme-dark">${scene()}</div><div class="pane-cap">다크</div></div>`;
+</script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="styles.css">
+<title>LogiFlow — 진단</title>
+</head>
+<body>
+<div class="stage" id="stage"></div>
+<script src="icons.js"></script>
+<script src="chrome.js"></script>
+<script>
+function diagTable() {
+  const row = (name, vidpid, rx, idx, ch) => `<tr>
+    <td><div class="dev">${ICON.mouse(17)}<span><span class="dot" style="display:inline-block;margin-right:7px;vertical-align:middle"></span>${name}</span></div></td>
+    <td class="mono muted">${vidpid}</td>
+    <td class="rx">${rx}</td>
+    <td class="mono">${idx}</td>
+    <td><span class="badge" style="background:var(--chip);color:var(--muted)">채널 ${ch}</span></td></tr>`;
+  return `<table class="tbl">
+    <thead><tr>
+      <th style="width:30%">기기</th><th>VID:PID</th><th>연결</th>
+      <th>0x1814 인덱스</th><th>채널</th></tr></thead>
+    <tbody>
+      ${row('MX Master 4','046D:C548','리시버 index 2','0x0E','1')}
+      ${row('MX Mechanical','046D:C548','리시버 index 4','0x09','1')}
+    </tbody></table>`;
+}
+function content() {
+  return `
+    <div class="page-head">
+      <div><div class="page-title">진단</div>
+        <div class="page-sub">기기별 채널·전환 인덱스 확인</div></div>
+      <div class="head-actions">
+        <div class="toggle-label">모두 보기 <div class="toggle"><span class="thumb"></span></div></div>
+        <button class="btn">${ICON.refresh(14)} 새로 고침</button>
+        <button class="btn">${ICON.folder(14)} 로그 폴더 열기</button>
+      </div>
+    </div>
+    <div class="section-label">스캔된 기기 <small>전환 가능 2개</small></div>
+    ${diagTable()}
+    <div class="note">${ICON.plug(14)} 기기 정보는 저장되어 매번 재검색하지 않음 · “모두 보기”를 켜면 빈 슬롯·리시버도 함께 표시</div>
+  `;
+}
+mountPanes('diag', content);
+</script>
+</body>
+</html>

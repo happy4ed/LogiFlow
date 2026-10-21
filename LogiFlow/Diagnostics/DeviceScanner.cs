@@ -30,6 +30,25 @@ namespace LogiFlow.Diagnostics
             _log = log;
         }
 
+        /// <summary>연결된 로지텍 HID 인터페이스 경로의 지문(변화 감지용·HID++ I/O 없음).</summary>
+        public static string Signature()
+        {
+            try
+            {
+                var paths = new List<string>();
+                foreach (var iface in HidEnumerator.Enumerate(LogitechVid, 0))
+                {
+                    paths.Add(iface.Path);
+                }
+                paths.Sort(StringComparer.Ordinal);
+                return string.Join("|", paths);
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
         public List<ScanResult> Scan()
         {
             var results = new List<ScanResult>();

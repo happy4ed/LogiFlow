@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="styles.css">
+<title>LogiFlow — 설정</title>
+</head>
+<body>
+<div class="stage" id="stage"></div>
+<script src="icons.js"></script>
+<script src="chrome.js"></script>
+<script>
+function toggle(on){ return `<div class="toggle ${on?'on':''}"><span class="thumb"></span></div>`; }
+function row(lab, desc, control, adv){
+  return `<div class="setrow">
+    <div><div class="lab">${lab}${adv?`<span class="adv">고급</span>`:''}</div>
+      <div class="desc">${desc}</div></div>
+    <div>${control}</div></div>`;
+}
+function seg(onKey){
+  const s=(k,t)=>`<span class="${k===onKey?'on':''}">${t}</span>`;
+  return `<div class="seg-inline">${s('sys','시스템')}${s('light','라이트')}${s('dark','다크')}</div>`;
+}
+function content(){
+  return `
+    <div class="page-head">
+      <div><div class="page-title">설정</div>
+        <div class="page-sub">실행과 로그를 관리</div></div>
+    </div>
+
+    <div class="group-head">테마</div>
+    <div class="setlist">
+      ${row('테마','시스템 설정을 따르거나 라이트·다크로 고정합니다.', seg('sys'))}
+    </div>
+
+    <div class="group-head" style="margin-top:16px;">실행</div>
+    <div class="setlist">
+      ${row('Windows 시작 시 실행','로그인하면 트레이에 자동으로 상주합니다.', toggle(true))}
+      ${row('로그온 전에도 실행','잠금 화면·로그인 전에도 전환이 동작합니다. 서비스 설치가 필요합니다.', toggle(false), true)}
+    </div>
+
+    <div class="group-head" style="margin-top:16px;">전환 · 진단</div>
+    <div class="setlist">
+      ${row('가장자리 자동 전환 사용','모니터 변에 붙인 채널로 커서를 밀면 자동 전환합니다.', toggle(true))}
+      ${row('진단 로그 남기기','엣지 판정·전환 트리거를 로그 폴더에 기록합니다.', toggle(true))}
+    </div>
+  `;
+}
+mountPanes('settings', content);
+</script>
+</body>
+</html>

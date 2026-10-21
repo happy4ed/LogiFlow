@@ -11,19 +11,21 @@ autographer 마스터 규칙을 상속하되, LogiFlow 는 **자체 origin 을 �
 - 참조 레포: `happy4ed/Logitech-MX-Auto-Switch`(hidapitester 기반). 우리는 외부 exe
   의존 없이 Windows HID API P/Invoke 로 자체 구현.
 
-## 현재 판: 0.3.0 — 엣지 자동 전환 (트레이 상주)
+## 현재 판: 0.4.0 — 승인 UX 시안 구현 (테마·캐시·설치파일)
 
-- 진단·수동 전환(0.1.x~0.2.0 상속): HID++ 열거·0x1814 런타임 조회·getHostInfo·
-  수동 전환 버튼. 전환 가능 기기만 기본 표시, "모두 보기(진단)" 토글.
-- 엣지 자동 전환: 설정 캔버스에서 다른 채널 PC 박스를 모니터 변에 배치 → 커서가 그 변의
-  2px 띠에 dwell(기본 0.33초)+바깥밀기 하면 그 채널로 전환 가능한 모든 기기를 함께 이동.
-  raw 마우스(WM_INPUT)·논리좌표(GetCursorPos+Screen.Bounds)·엣지 판정은 LocalDex 이식.
-- 트레이 상주 + 로그인 자동 시작(HKCU Run). 창 닫으면 트레이로. 설정은 %APPDATA%\LogiFlow\config.txt.
-- **안전 불변식(통제된 쓰기): 쓰기는 0x1814 func1 setHost 하나뿐이며, `HostSwitcher` 경유로만,
-  (a)0x1814 지원 (b)targetHost 0~hostCount-1 범위 (c)명시 트리거(엣지 or 버튼) — 이 3조건에서만.
-  그 외 쓰기(SetFeature·SetOutputReport·모르는 func) 금지. 엣지는 설정에서 끌 수 있고 배치가
-  비면 무동작. 엣지 판정·전환 트리거는 진단 로그에 남긴다.**
-- 설계 메모(다음 판): 로그온 전 동작·설치파일·클립보드·ARM 빌드.
+- 승인 시안(design/ v2) 구현: 사이드바 내비(전환 관리·설정·진단) + 콘텐츠. 커스텀 페인팅
+  테마(brief v3 Light/Dark 토큰)·토글·세그먼트·배지·카드. 고정 창(페이지 바꿔도 크기 불변,
+  리사이즈·최소크기, 내용 많으면 스크롤).
+- 전환 관리: 모니터 배치 캔버스(채널 박스=모니터 크기, 접촉 파랑 자동·분리 점선 수동)·채널
+  별칭 편집·기기 목록(전환)·가장자리 자동 전환 옵션.
+- 기기 캐시(%APPDATA%\LogiFlow\devices.txt): 시작 시 즉시 표시, 새로 고침·기기 변화
+  (WM_DEVICECHANGE 지문 비교) 때만 재스캔.
+- 트레이 우클릭: 별칭 포함 바로 전환(현재 제외) + 설정 열기 + 새로 고침 + 종료.
+- 앱 아이콘(.ico): 시안 "두 화면 흐름" 마크. 설치파일: Inno Setup per-user(build/windows/LogiFlow.iss).
+- **안전 불변식(통제된 쓰기): 쓰기는 0x1814 func1 setHost 하나뿐, `HostSwitcher` 경유로만,
+  (a)0x1814 지원 (b)0~hostCount-1 (c)명시 트리거(엣지 or 트레이/버튼). 그 외 쓰기 금지. 엣지는
+  설정에서 끌 수 있고 배치 비면 무동작. 로그는 진단 로그 토글.**
+- 설계 메모(다음 판): 로그온 전 실행(서비스)·클립보드·ARM 빌드.
 
 ## 스택 / 빌드
 
@@ -39,6 +41,8 @@ autographer 마스터 규칙을 상속하되, LogiFlow 는 **자체 origin 을 �
 - `LogiFlow/Hidpp/HidppDevice.cs` — HID++ 프레이밍·IRoot·0x1814·0x0005.
 - `LogiFlow/Diagnostics/` — 스캐너(DeviceScanner)·로거(DiagLogger)·결과 모델·전환(HostSwitcher).
 - `LogiFlow/Handoff/` — 엣지 판정(EdgeDetector·LocalDex 이식)·raw 마우스 감시(EdgeWatcher).
-- `LogiFlow/Config/` — 설정(AppConfig)·자동시작(AutoStart).
-- `LogiFlow/MonitorLayoutPanel.cs` — 모니터 배치 캔버스. `LogiFlow/TrayAppContext.cs` — 트레이 상주·오케스트레이션.
-- `LogiFlow/MainForm.cs` — 설정 창(진단·전환 탭 + 엣지 자동전환 탭).
+- `LogiFlow/Config/` — 설정(AppConfig)·자동시작(AutoStart). `LogiFlow/Diagnostics/DeviceCache.cs` — 기기 캐시.
+- `LogiFlow/Ui/` — 테마(Theme)·아이콘(Icons)·테마 컨트롤(ThemedControls: 버튼·토글·세그먼트·배지·카드·내비)·앱아이콘(AppIcon).
+- `LogiFlow/MonitorLayoutPanel.cs` — 전환 관리 캔버스. `LogiFlow/TrayAppContext.cs` — 트레이·오케스트레이션.
+- `LogiFlow/MainForm.cs` — 사이드바 내비 + 3화면 창. `LogiFlow/Resources/logiflow.ico` — 앱 아이콘.
+- `build/windows/LogiFlow.iss` — Inno Setup 설치 스크립트. `design/` — 승인 UX 시안.
