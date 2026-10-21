@@ -18,6 +18,7 @@ namespace LogiFlow
         public DiagLogger Log { get; private set; }
         public AppConfig Config { get; private set; }
         public List<ScanResult> LastResults { get; private set; }
+        public bool IsScanning { get { return _scanning; } }
 
         private NotifyIcon _tray;
         private ContextMenuStrip _menu;
@@ -165,6 +166,8 @@ namespace LogiFlow
             if (_scanning) return;
             _scanning = true;
             UpdateTray("스캔 중...");
+            // 화면에 즉시 '스캔 중…' 표시(진단 새로 고침 버튼) — 피드백 없음 해소.
+            try { _settings.OnStateUpdated(); } catch { }
             var t = new Thread(() =>
             {
                 List<ScanResult> results;

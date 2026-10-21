@@ -11,7 +11,14 @@ autographer 마스터 규칙을 상속하되, LogiFlow 는 **자체 origin 을 �
 - 참조 레포: `happy4ed/Logitech-MX-Auto-Switch`(hidapitester 기반). 우리는 외부 exe
   의존 없이 Windows HID API P/Invoke 로 자체 구현.
 
-## 현재 판: 0.8.0 — 로그온 전에도 실행(선택·기본 꺼짐)
+## 현재 판: 0.9.0 — UI 일관성(버튼 폰트 통일·토글 키움) · 폭 상한 · 캔버스 스크롤 · 로그온 전 정정
+
+- 버튼 폰트 9pt 고정(Form 상속 제거) · 토글 40×22 · 콘텐츠 열 폭 상한 `ContentMax=560`(`Cw`) · 창 820×660(최소 760×600).
+- 전환 캔버스 = AutoScroll 호스트 안 `MonitorLayoutPanel`(고정 스케일 주모니터≈180px · `RelayoutToHost` · 넘치면 상하좌우 스크롤).
+- 진단: 머리 줄 재배치(토글 안 잘림) · 새로 고침 = `IsScanning` 즉시 「스캔 중…」 비활성 피드백 · 설정 빌드마다 schtasks 안 돌게 `_preLogonInstalled` 캐시(백그라운드 1회).
+- 로그온 전: 0.8.0 '부팅 당기기'는 회장님이 원한 게 아님 + 끄기 버그 → 켜기=안내만(설치 안 함)·끄기=이전 작업 확실 제거. `PreLogon.IsInstalled` 데드락 제거. 진짜 '로그인 화면 엣지 전환'(Winlogon 보안 데스크톱)은 방식 확정 후 별도.
+
+## 이전 판: 0.8.0 — 로그온 전에도 실행(선택·기본 꺼짐)
 
 - 설정 토글 ON → UAC 상승 후 SYSTEM ONSTART 예약 작업(`LogiFlow-PreLogon`) 설치. 부팅 시 `--prelogon-pull=<myHost>`
   로 UI 없이 짧게 떠 마우스·키보드를 이 PC 채널로 당김(로그인 화면 전). `LogiFlow/Config/PreLogon.cs`(+`PreLogonRunner`).

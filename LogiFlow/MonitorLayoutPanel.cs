@@ -34,6 +34,9 @@ namespace LogiFlow
         private int _primaryIndex = 0;
         private Func<int, string> _aliasFor = (ch) => "채널 " + (ch + 1);
         private float _boxW = 120, _boxH = 72;
+        // 고정 스케일 배치용: 가상 경계(여백 포함)와 px/가상 스케일. 콘텐츠가 뷰포트보다 크면 호스트가 스크롤.
+        private int _vLeft, _vTop, _vW = 1, _vH = 1;
+        private double _scale = 0.1;
 
         private ChannelBox _dragging;
         private PointF _dragOffset;
@@ -74,6 +77,60 @@ namespace LogiFlow
                 }
                 _boxes.Add(box);
             }
+            ComputeVirtualAndScale();
+            Invalidate();
+        }
+
+        /// <summary>
+        /// 모니터 가상 경계(채널 박스가 변에 붙을 여백 포함)와 고정 스케일을 계산한다.
+        /// 스케일은 주 모니터가 보기 좋은 크기(≈180px)가 되도록 고정 — 모니터가 늘면 콘텐츠가 커져 스크롤된다.
+        /// </summary>
+        private void ComputeVirtualAndScale()
+        {
+            if (_screens.Length == 0) { _vLeft = _vTop = 0; _vW = _vH = 1; return; }
+
+            int vLeft = int.MaxValue, vTop = int.MaxValue, vRight = int.MinValue, vBottom = int.MinValue;
+            double sumWo = 0, sumHo = 0;
+            foreach (Screen s in _screens)
+            {
+                Rectangle b = s.Bounds;
+                vLeft = Math.Min(vLeft, b.Left); vTop = Math.Min(vTop, b.Top);
+                vRight = Math.Max(vRight, b.Right); vBottom = Math.Max(vBottom, b.Bottom);
+                sumWo += b.Width; sumHo += b.Height;
+            }
+            int n = _screens.Length;
+            double avgWo = sumWo / n, avgHo = sumHo / n;
+            // 변에 붙는 채널 박스(=모니터 1칸)와 라벨이 들어갈 여백(가로 1.2칸·세로 1.5칸).
+            int marginX = (int)(avgWo * 1.2), marginY = (int)(avgHo * 1.5);
+            vLeft -= marginX; vRight += marginX; vTop -= marginY; vBottom += marginY;
+            _vLeft = vLeft; _vTop = vTop;
+            _vW = Math.Max(1, vRight - vLeft);
+            _vH = Math.Max(1, vBottom - vTop);
+
+            // 주 모니터 폭이 ≈180px 가 되도록 고정 스케일.
+            int primW = Math.Max(1, _screens[_primaryIndex].Bounds.Width);
+            double sc = 180.0 / primW;
+            if (sc < 0.02) sc = 0.02;
+            if (sc > 0.20) sc = 0.20;
+            _scale = sc;
+        }
+
+        /// <summary>
+        /// 호스트(AutoScroll 패널) 뷰포트 크기를 받아 자기 크기를 콘텐츠 크기와 뷰포트 중 큰 값으로 맞춘다.
+        /// 콘텐츠가 더 크면 호스트에 상하좌우 스크롤바가 생긴다.
+        /// </summary>
+        public void RelayoutToHost(Size viewport)
+        {
+            if (_screens.Length == 0)
+            {
+                Size = new Size(Math.Max(1, viewport.Width), Math.Max(1, viewport.Height));
+                Invalidate();
+                return;
+            }
+            if (_scale <= 0) ComputeVirtualAndScale();
+            int needW = (int)(_vW * _scale) + 2 * Pad;
+            int needH = (int)(_vH * _scale) + 2 * Pad;
+            Size = new Size(Math.Max(viewport.Width, needW), Math.Max(viewport.Height, needH));
             Invalidate();
         }
 
@@ -127,36 +184,20 @@ namespace LogiFlow
             _monitorPanelRects.Clear();
             if (_screens.Length == 0) return;
 
-            int vLeft = int.MaxValue, vTop = int.MaxValue, vRight = int.MinValue, vBottom = int.MinValue;
-            double sumWo = 0, sumHo = 0;
-            foreach (Screen s in _screens)
-            {
-                Rectangle b = s.Bounds;
-                vLeft = Math.Min(vLeft, b.Left); vTop = Math.Min(vTop, b.Top);
-                vRight = Math.Max(vRight, b.Right); vBottom = Math.Max(vBottom, b.Bottom);
-                sumWo += b.Width; sumHo += b.Height;
-            }
-            int n = _screens.Length;
-            double avgWo = sumWo / n, avgHo = sumHo / n;
-            // 변에 붙는 채널 박스 = 모니터 1칸 크기. 플러시로 붙으면 모니터 바깥으로 1칸 나가고 라벨이
-            // 위·아래로 더 나가므로, 여백을 모니터 1칸 이상(가로 1.3칸·세로 1.6칸) 확보해 잘리지 않게 한다.
-            int marginX = (int)(avgWo * 1.3), marginY = (int)(avgHo * 1.6);
-            vLeft -= marginX; vRight += marginX; vTop -= marginY; vBottom += marginY;
-            int vW = Math.Max(1, vRight - vLeft), vH = Math.Max(1, vBottom - vTop);
-
-            double scale = Math.Min((ClientSize.Width - 2.0 * Pad) / vW, (ClientSize.Height - 2.0 * Pad) / vH);
-            if (scale <= 0) scale = 0.01;
-            double offX = Pad + (ClientSize.Width - 2.0 * Pad - vW * scale) / 2.0;
-            double offY = Pad + (ClientSize.Height - 2.0 * Pad - vH * scale) / 2.0;
+            if (_scale <= 0) ComputeVirtualAndScale();
+            // 고정 스케일로 그리고, 콘텐츠(가상*스케일)가 ClientSize 보다 작으면 가운데 정렬.
+            double drawnW = _vW * _scale, drawnH = _vH * _scale;
+            double offX = Math.Max(Pad, (ClientSize.Width - drawnW) / 2.0);
+            double offY = Math.Max(Pad, (ClientSize.Height - drawnH) / 2.0);
 
             double sumW = 0, sumH = 0;
             foreach (Screen s in _screens)
             {
                 Rectangle b = s.Bounds;
-                int px = (int)(offX + (b.Left - vLeft) * scale);
-                int py = (int)(offY + (b.Top - vTop) * scale);
-                int pw = (int)(b.Width * scale);
-                int ph = (int)(b.Height * scale);
+                int px = (int)(offX + (b.Left - _vLeft) * _scale);
+                int py = (int)(offY + (b.Top - _vTop) * _scale);
+                int pw = (int)(b.Width * _scale);
+                int ph = (int)(b.Height * _scale);
                 _monitorPanelRects.Add(new HandoffRect(px, py, pw, ph));
                 sumW += pw; sumH += ph;
             }

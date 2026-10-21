@@ -26,12 +26,32 @@ namespace LogiFlow
         private NavButton _navSwitch, _navSettings, _navDiag;
         private int _pageIndex;
         private bool _busy;
+        private bool _preLogonInstalled;   // 로그온 전 작업 존재 여부(캐시 — 설정 빌드마다 schtasks 안 돌게).
 
         public MainForm(TrayAppContext tray)
         {
             _tray = tray;
             BuildUi();
             Theme.Changed += OnThemeChanged;
+            StartPreLogonStateProbe();
+        }
+
+        /// <summary>로그온 전 작업 존재 여부를 백그라운드로 1회 조회해 캐시(설정 탭 지연 방지).</summary>
+        private void StartPreLogonStateProbe()
+        {
+            var t = new Thread(() =>
+            {
+                bool installed = PreLogon.IsInstalled();
+                _preLogonInstalled = installed;   // 다음 설정 빌드에서 반영되도록 먼저 기록.
+                try
+                {
+                    if (!IsDisposed && IsHandleCreated)
+                        BeginInvoke((Action)(() => { if (_pageIndex == 1) ShowPage(1); }));
+                }
+                catch { }
+            });
+            t.IsBackground = true;
+            t.Start();
         }
 
         private void BuildUi()
@@ -39,8 +59,8 @@ namespace LogiFlow
             Text = "LogiFlow";
             Icon = AppIcon.Get();
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(1120, 650);
-            MinimumSize = new Size(980, 600);
+            ClientSize = new Size(820, 660);
+            MinimumSize = new Size(760, 600);
             Font = UiFont.Get(10f);
 
             _sidebar = new Panel { Dock = DockStyle.Left, Width = 182, Padding = new Padding(12, 14, 12, 12) };
@@ -162,20 +182,35 @@ namespace LogiFlow
             foreach (Control c in old) c.Dispose();
         }
 
+        // 콘텐츠 열 최대 폭 — 창이 넓어도 이 폭 이상 늘어나지 않게 해 캔버스·행이 과하게 벌어지지 않는다.
+        private const int ContentMax = 560;
+
+        /// <summary>콘텐츠 열 폭(뷰포트 - 좌우 여백, 상한 ContentMax).</summary>
+        private static int Cw(int vw) { return Math.Min(vw - 48, ContentMax); }
+
         public void ShowPage(int index)
         {
             _pageIndex = index;
             UpdateNavActive();
             int vw = Math.Max(500, _pageHost.ViewportWidth);
-            Panel page;
-            switch (index)
+            // 레이아웃·그리기 정지로 탭 전환 시 중간 재배치·깜빡임을 없앤다.
+            _pageHost.SuspendLayout();
+            try
             {
-                case 1: page = BuildSettingsPage(vw); break;
-                case 2: page = BuildDiagPage(vw); break;
-                default: page = BuildSwitchPage(vw); break;
+                Panel page;
+                switch (index)
+                {
+                    case 1: page = BuildSettingsPage(vw); break;
+                    case 2: page = BuildDiagPage(vw); break;
+                    default: page = BuildSwitchPage(vw); break;
+                }
+                page.Location = new Point(0, 0);
+                _pageHost.SetContent(page);
             }
-            page.Location = new Point(0, 0);
-            _pageHost.SetContent(page);
+            finally
+            {
+                _pageHost.ResumeLayout(true);
+            }
         }
 
         // ---- 공통 빌더 ----
@@ -211,7 +246,7 @@ namespace LogiFlow
         private Panel BuildSwitchPage(int vw)
         {
             var page = new Panel { Width = vw, Padding = new Padding(24, 20, 24, 20), BackColor = Theme.Content };
-            int W = vw - 48;
+            int W = Cw(vw);
             int y = 20;
 
             var title = Title("전환 관리"); title.Location = new Point(24, y); page.Controls.Add(title);
@@ -220,8 +255,10 @@ namespace LogiFlow
             page.Controls.Add(refresh);
             y += 58;
 
-            int canvasH = 380;
-            var canvas = new MonitorLayoutPanel { Left = 24, Top = y, Width = W, Height = canvasH };
+            // 캔버스는 적정 폭/높이로 고정하고, 모니터가 넘치면 그 영역만 상하좌우 스크롤(AutoScroll 호스트).
+            int canvasH = 300;
+            var canvasHost = new Panel { Left = 24, Top = y, Width = W, Height = canvasH, BackColor = Theme.CanvasBg, AutoScroll = true };
+            var canvas = new MonitorLayoutPanel { Left = 0, Top = 0 };
             int maxHost = _tray.MaxHostCount();
             int current = _tray.CurrentChannel();
             var channels = new List<int>();
@@ -233,7 +270,10 @@ namespace LogiFlow
                 Config.Attachments.AddRange(canvas.GetAttachments());
                 _tray.ApplyConfig();
             };
-            page.Controls.Add(canvas);
+            canvasHost.Controls.Add(canvas);
+            canvasHost.ClientSizeChanged += (s, e) => canvas.RelayoutToHost(canvasHost.ClientSize);
+            canvas.RelayoutToHost(new Size(W, canvasH));
+            page.Controls.Add(canvasHost);
             y += canvasH + 14;
 
             // 채널 별칭
@@ -358,11 +398,11 @@ namespace LogiFlow
             var edgeToggle = new ThemedToggle { Checked = Config.EdgeSwitchEnabled, Top = 20 };
             edgeToggle.CheckedChanged += (s, e) => { Config.EdgeSwitchEnabled = edgeToggle.Checked; _tray.ApplyConfig(); };
 
-            edgeToggle.Left = w - 28; dwellBtn.Left = edgeToggle.Left - 86; dwellLbl.Left = dwellBtn.Left - 30;
+            edgeToggle.Left = w - 40; dwellBtn.Left = edgeToggle.Left - 90; dwellLbl.Left = dwellBtn.Left - 30;
             foot.Controls.Add(edgeIcon); foot.Controls.Add(edgeLbl); foot.Controls.Add(dwellLbl); foot.Controls.Add(dwellBtn); foot.Controls.Add(edgeToggle);
 
-            var guardChk = new ThemedToggle { Checked = Config.DragGuard, Top = 54 };
-            var guardLbl = new Label { Text = "드래그 중 전환 안 함", AutoSize = true, ForeColor = Theme.Ink, Font = UiFont.Get(8.5f), Left = 34, Top = 56 };
+            var guardChk = new ThemedToggle { Checked = Config.DragGuard, Top = 52 };
+            var guardLbl = new Label { Text = "드래그 중 전환 안 함", AutoSize = true, ForeColor = Theme.Ink, Font = UiFont.Get(8.5f), Left = 50, Top = 56 };
             guardChk.Left = 0;
             guardChk.CheckedChanged += (s, e) => { Config.DragGuard = guardChk.Checked; _tray.ApplyConfig(); };
 
@@ -396,7 +436,7 @@ namespace LogiFlow
         private Panel BuildSettingsPage(int vw)
         {
             var page = new Panel { Width = vw, BackColor = Theme.Content };
-            int W = vw - 48;
+            int W = Cw(vw);
             int y = 20;
             var title = Title("설정"); title.Location = new Point(24, y); page.Controls.Add(title);
             var sub = Sub("실행과 로그를 관리"); sub.Location = new Point(24, y + 28); page.Controls.Add(sub);
@@ -439,8 +479,8 @@ namespace LogiFlow
             var runCard = Card(24, y, W, 2 * 60);
             AddSettingRow(runCard, 0, "Windows 시작 시 실행", "로그인하면 트레이에 자동으로 상주합니다.", false,
                 Config.AutoStart, (on) => { Config.AutoStart = on; _tray.ApplyConfig(); });
-            AddSettingRow(runCard, 60, "로그온 전에도 실행", "부팅 시(로그인 전) 마우스·키보드를 이 PC 로 당깁니다. 리시버가 이 PC 에 있어야 하고 관리자 권한이 필요합니다. 잠금 화면에선 가장자리 전환은 안 됩니다.", true,
-                PreLogon.IsInstalled(), TogglePreLogon);
+            AddSettingRow(runCard, 60, "로그온 전에도 실행", "로그인 화면에서도 엣지 전환이 되게 하는 기능(보안 데스크톱 접근)은 방식 확정 후 제공합니다. 켜도 지금은 설치되지 않습니다.", true,
+                _preLogonInstalled, TogglePreLogon);
             page.Controls.Add(runCard);
             y += 2 * 60 + 16;
 
@@ -461,34 +501,34 @@ namespace LogiFlow
         {
             if (on)
             {
-                if (Config.MyHost < 0)
-                {
-                    MessageBox.Show(this, "먼저 [진단]에서 새로 고침 해 이 PC 의 채널이 한 번 읽혀야 설치할 수 있습니다.", "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    BeginInvoke((Action)(() => ShowPage(1)));
-                    return;
-                }
-                bool ok = PreLogon.RequestEnable(Config.MyHost);
-                Config.PreLogon = ok;
-                _tray.ApplyConfig();
-                MessageBox.Show(this, ok
-                    ? string.Format("로그온 전 실행을 설치했습니다.\r\n부팅 시 마우스·키보드를 이 PC(채널 {0})로 당깁니다.\r\n\r\n※ 리시버/동글이 이 PC 에 있어야 하며, 잠금 화면에서는 커서가 없어 가장자리 전환은 되지 않습니다.", Config.MyHost + 1)
-                    : "설치가 취소되었거나 실패했습니다.\r\n관리자 권한(UAC)이 필요하며, 회사 정책으로 막혀 있을 수 있습니다.",
-                    "LogiFlow", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                // 로그인 화면 엣지 전환은 보안 데스크톱(Winlogon) 접근이 필요 — 방식 확정 전까지 설치하지 않는다(정직).
+                MessageBox.Show(this,
+                    "로그인 화면에서의 엣지 전환은 윈도우 보안 화면(Winlogon) 접근이 필요해 방식 확정 후 제공합니다.\r\n지금은 아무것도 설치하지 않습니다.",
+                    "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
             {
-                bool ok = PreLogon.RequestDisable();
-                if (ok) Config.PreLogon = false;
-                _tray.ApplyConfig();
+                // 끄기: 이전 판(0.8.0)에서 설치된 부팅 작업이 남아 있으면 확실히 제거한다.
+                if (_preLogonInstalled || PreLogon.IsInstalled())
+                {
+                    bool ok = PreLogon.RequestDisable();
+                    MessageBox.Show(this,
+                        ok ? "로그온 전 실행(이전 판 설치분)을 제거했습니다."
+                           : "제거가 취소되었거나 실패했습니다. 관리자 권한(UAC)이 필요합니다.",
+                        "LogiFlow", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                }
             }
+            Config.PreLogon = false;
+            _preLogonInstalled = PreLogon.IsInstalled();
+            _tray.ApplyConfig();
             BeginInvoke((Action)(() => ShowPage(1)));
         }
 
         private Control MakeRowLabel(string lab, string desc, int top)
         {
-            var p = new Panel { Left = 16, Top = top, Width = 420, Height = 40, BackColor = Theme.Section };
+            var p = new Panel { Left = 16, Top = top, Width = 290, Height = 40, BackColor = Theme.Section };
             var l1 = new Label { Text = lab, AutoSize = true, Font = UiFont.Get(9.5f, FontStyle.Bold), ForeColor = Theme.Ink, Left = 0, Top = 0 };
-            var l2 = new Label { Text = desc, AutoSize = false, Font = UiFont.Get(8.5f), ForeColor = Theme.Muted, Left = 0, Top = 19, Width = 440, Height = 18 };
+            var l2 = new Label { Text = desc, AutoSize = false, Font = UiFont.Get(8.5f), ForeColor = Theme.Muted, Left = 0, Top = 19, Width = 288, Height = 32 };
             p.Controls.Add(l1); p.Controls.Add(l2);
             return p;
         }
@@ -505,7 +545,7 @@ namespace LogiFlow
             }
             var l2 = new Label { Text = desc, AutoSize = false, Font = UiFont.Get(8.5f), ForeColor = Theme.Muted, Left = 16, Top = 32, Width = card.Width - 90, Height = 18 };
             row.Controls.Add(l2);
-            var tg = new ThemedToggle { Checked = on, Left = card.Width - 44, Top = 22 };
+            var tg = new ThemedToggle { Checked = on, Left = card.Width - 56, Top = 19 };
             tg.CheckedChanged += (s, e) => onChange(tg.Checked);
             row.Controls.Add(tg);
             if (top > 0)
@@ -520,16 +560,21 @@ namespace LogiFlow
         private Panel BuildDiagPage(int vw)
         {
             var page = new Panel { Width = vw, BackColor = Theme.Content };
-            int W = vw - 48;
+            int W = Cw(vw);
             int y = 20;
             var title = Title("진단"); title.Location = new Point(24, y); page.Controls.Add(title);
             var sub = Sub("기기별 채널·전환 인덱스 확인"); sub.Location = new Point(24, y + 28); page.Controls.Add(sub);
 
-            var showAll = new ThemedToggle { Checked = _showAllDiag, Top = y + 4 };
-            var showAllLbl = new Label { Text = "모두 보기", AutoSize = true, ForeColor = Theme.Ink, Font = UiFont.Get(8.5f), Top = y + 6 };
-            var refreshBtn = new ThemedButton { Text = "새로 고침", Icon = Icons.Refresh, Width = 104, Height = 28, Top = y };
-            var logBtn = new ThemedButton { Text = "로그 폴더 열기", Icon = Icons.Folder, Width = 128, Height = 28, Top = y };
-            logBtn.Left = 24 + W - 128; refreshBtn.Left = logBtn.Left - 112; showAll.Left = refreshBtn.Left - 40; showAllLbl.Left = showAll.Left - 56;
+            bool scanning = _tray.IsScanning;
+            var logBtn = new ThemedButton { Text = "로그 폴더 열기", Icon = Icons.Folder, Width = 126, Height = 28, Top = y };
+            var refreshBtn = new ThemedButton { Text = scanning ? "스캔 중…" : "새로 고침", Icon = Icons.Refresh, Width = 108, Height = 28, Top = y, Enabled = !scanning };
+            var showAll = new ThemedToggle { Checked = _showAllDiag, Top = y + 3 };
+            var showAllLbl = new Label { Text = "모두 보기", AutoSize = true, ForeColor = Theme.Ink, Font = UiFont.Get(9f), Top = y + 6 };
+            const int gap = 10;
+            logBtn.Left = 24 + W - logBtn.Width;
+            refreshBtn.Left = logBtn.Left - gap - refreshBtn.Width;
+            showAll.Left = refreshBtn.Left - gap - showAll.Width;
+            showAllLbl.Left = showAll.Left - 6 - TextRenderer.MeasureText(showAllLbl.Text, showAllLbl.Font).Width;
             showAll.CheckedChanged += (s, e) => { _showAllDiag = showAll.Checked; ShowPage(2); };
             refreshBtn.Click += (s, e) => _tray.Rescan();
             logBtn.Click += (s, e) => OpenLogFolder();

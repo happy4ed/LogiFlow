@@ -26,19 +26,16 @@ namespace LogiFlow.Config
         {
             try
             {
+                // 출력은 리디렉션하지 않는다(파이프 버퍼 데드락 방지) — CreateNoWindow 로 콘솔만 숨기고 종료코드만 본다.
                 var psi = new ProcessStartInfo("schtasks.exe", "/Query /TN \"" + TaskName + "\"")
                 {
                     UseShellExecute = false,
                     CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
                 };
                 using (var p = Process.Start(psi))
                 {
                     if (p == null) return false;
-                    p.StandardOutput.ReadToEnd();
-                    p.StandardError.ReadToEnd();
-                    p.WaitForExit(5000);
+                    if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return false; }
                     return p.ExitCode == 0;
                 }
             }

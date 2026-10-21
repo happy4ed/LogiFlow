@@ -44,6 +44,8 @@ namespace LogiFlow.Ui
             FlatAppearance.BorderSize = 0;
             BackColor = Color.Transparent;
             Height = 28;
+            // 모든 버튼은 같은 폰트. Form 폰트(큼) 상속 대신 고정해 라벨·배지와 크기 일치.
+            Font = UiFont.Get(9f);
             Cursor = Cursors.Hand;
             Theme.Changed += OnTheme;
         }
@@ -121,7 +123,7 @@ namespace LogiFlow.Ui
         }
     }
 
-    /// <summary>28x16 토글 스위치.</summary>
+    /// <summary>40x22 토글 스위치.</summary>
     public sealed class ThemedToggle : Control
     {
         private bool _checked;
@@ -131,7 +133,7 @@ namespace LogiFlow.Ui
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint
                      | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            Size = new Size(28, 16);
+            Size = new Size(40, 22);
             Cursor = Cursors.Hand;
             Theme.Changed += OnTheme;
         }
