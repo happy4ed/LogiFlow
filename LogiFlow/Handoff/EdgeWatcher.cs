@@ -15,7 +15,7 @@ namespace LogiFlow.Handoff
     /// 좌표계: GetCursorPos + Screen.Bounds 모두 논리 픽셀(LocalDex 가 검증한 방식).
     /// 전환 후엔 이 PC 에서 기기가 사라지므로 이 PC 는 더 명령을 보낼 수 없다(복귀는 대상 PC/기기 버튼).
     /// </summary>
-    public sealed class EdgeWatcher : IDisposable
+    internal sealed class EdgeWatcher : IDisposable
     {
         private sealed class Attach
         {
@@ -57,7 +57,7 @@ namespace LogiFlow.Handoff
         private int _dwellMs = EdgeDetector.DefaultDwellMs;
         private long _lastSampleMs = -1;
 
-        public EdgeWatcher(DiagLogger log, Action<int> onTrigger)
+        internal EdgeWatcher(DiagLogger log, Action<int> onTrigger)
         {
             _log = log;
             _onTrigger = onTrigger;
