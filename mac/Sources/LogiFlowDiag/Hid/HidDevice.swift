@@ -124,7 +124,7 @@ final class HidRunLoop {
 
     private var runLoop: CFRunLoop!
     private let ready = DispatchSemaphore(value: 0)
-    let mode = CFRunLoopMode.defaultMode
+    let mode = CFRunLoopMode.defaultMode!
 
     private init() {
         // 수명 싱글턴 — 강한 캡처로 초기화 중 nil 위험을 없앤다(순환은 앱 수명 동안 의도된 것).
@@ -134,7 +134,7 @@ final class HidRunLoop {
             // 빈 런루프는 소스가 없으면 즉시 반환하므로, 깨어 있게 타이머 소스를 하나 건다.
             let timer = CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + 1,
                                              1, 0, 0, { _, _ in }, nil)
-            CFRunLoopAddTimer(self.runLoop, timer, CFRunLoopMode.defaultMode)
+            CFRunLoopAddTimer(self.runLoop, timer, mode)
             CFRunLoopRun()
         }
         thread.name = "LogiFlow.HidRunLoop"
