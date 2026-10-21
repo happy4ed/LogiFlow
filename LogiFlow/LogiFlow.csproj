@@ -55,6 +55,7 @@
     <Compile Include="Diagnostics\DiagLogger.cs" />
     <Compile Include="Diagnostics\ScanResult.cs" />
     <Compile Include="Diagnostics\DeviceScanner.cs" />
+    <Compile Include="Diagnostics\HostSwitcher.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

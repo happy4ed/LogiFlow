@@ -7,8 +7,9 @@ namespace LogiFlow.Hidpp
 {
     /// <summary>
     /// 한 HID++ 인터페이스(long 0x0202 또는 short 0x0201) 위에서 특정 deviceIndex 를 상대로
-    /// 조회성 호출을 수행한다. 출력 리포트 길이로 long(0x11)/short(0x10) 프레임을 자동 선택한다.
-    /// 읽기 전용: func0 / IRoot(0x0000) / DeviceName(0x0005) 만 보낸다.
+    /// 호출을 수행한다. 출력 리포트 길이로 long(0x11)/short(0x10) 프레임을 자동 선택한다.
+    /// 조회: func0 / IRoot(0x0000) / DeviceName(0x0005). 쓰기: SetHost(0x1814 func1) 하나뿐이며
+    /// 명시적 전환 버튼에서만, 지원·범위 검증 후에만 호출한다. 그 밖의 쓰기 경로는 없다.
     /// </summary>
     internal sealed class HidppDevice
     {
@@ -42,11 +43,10 @@ namespace LogiFlow.Hidpp
         /// 인터페이스가 long(20바이트)이면 0x11, 아니면 short(0x10·7바이트) 프레임을 쓴다.
         /// 타임아웃 시 null, 오류 응답 시 HidppErrorException.
         /// </summary>
-        public byte[] Call(byte deviceIndex, byte featureIndex, byte funcIndex, byte[] parms, int timeoutMs)
+        /// <summary>출력 리포트 길이로 long(0x11·20바이트)/short(0x10·7바이트) 프레임을 만든다.</summary>
+        private byte[] BuildReport(byte deviceIndex, byte featureIndex, byte funcIndex, byte[] parms)
         {
             byte funcByte = FuncByte(funcIndex);
-
-            // 출력 리포트 길이로 프레임 종류 결정: >=20 이면 long(0x11), 아니면 short(0x10).
             bool useLong = _stream.OutputReportByteLength >= 20;
             int reportLen = useLong ? 20 : 7;
             int maxParams = useLong ? 16 : 3;
@@ -61,6 +61,12 @@ namespace LogiFlow.Hidpp
                 int n = Math.Min(parms.Length, maxParams);
                 Array.Copy(parms, 0, report, 4, n);
             }
+            return report;
+        }
+
+        public byte[] Call(byte deviceIndex, byte featureIndex, byte funcIndex, byte[] parms, int timeoutMs)
+        {
+            byte[] report = BuildReport(deviceIndex, featureIndex, funcIndex, parms);
 
             _log.LogTx(deviceIndex, report);
 
@@ -177,6 +183,41 @@ namespace LogiFlow.Hidpp
             }
             nbHost = payload[0];
             currHost = payload[1];
+            return true;
+        }
+
+        /// <summary>
+        /// 0x1814 func1 setHost(targetHostIndex) — 호스트 전환(쓰기).
+        /// 기기가 전환 즉시 USB/BT 연결을 리셋하므로 응답을 기다리지 않는다(fire-and-forget):
+        /// 리포트를 보내고 짧게 drain 후 무시한다. 명시적 전환 버튼에서만 호출해야 한다.
+        /// 호출 측(HostSwitcher)에서 (a)0x1814 지원 (b)0~hostCount-1 범위를 이미 검증한다.
+        /// </summary>
+        public bool SetHost(byte deviceIndex, byte changeHostIndex, byte targetHostIndex, int writeTimeoutMs)
+        {
+            byte[] report = BuildReport(deviceIndex, changeHostIndex, 1, new byte[] { targetHostIndex });
+            _log.Log(string.Format("TX(setHost) dev=0x{0:X2} feat=0x{1:X2} target={2}  [{3}]",
+                deviceIndex, changeHostIndex, targetHostIndex, DiagLogger.Hex(report)));
+
+            bool ok = _stream.Write(report, writeTimeoutMs);
+            if (!ok)
+            {
+                _log.LogError(string.Format("setHost 전송 실패 dev=0x{0:X2}", deviceIndex));
+                return false;
+            }
+
+            // 전환 후 기기는 사라지므로 응답은 오지 않을 수 있다. 짧게 한 번 읽고 버린다.
+            try
+            {
+                byte[] resp = _stream.Read(120);
+                if (resp != null)
+                {
+                    _log.LogRx(resp);
+                }
+            }
+            catch
+            {
+                // drain 실패는 무시.
+            }
             return true;
         }
 

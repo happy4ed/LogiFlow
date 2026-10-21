@@ -11,17 +11,20 @@ autographer 마스터 규칙을 상속하되, LogiFlow 는 **자체 origin 을 �
 - 참조 레포: `happy4ed/Logitech-MX-Auto-Switch`(hidapitester 기반). 우리는 외부 exe
   의존 없이 Windows HID API P/Invoke 로 자체 구현.
 
-## 현재 판: 0.1.2 — 읽기 전용 진단 (여러 기기 전수 탐색)
+## 현재 판: 0.2.0 — 진단 + 전환 테스트 (통제된 쓰기)
 
-- 하는 일: HID++ 기기 열거(long 0x0202 + short 0x0201 + 벤더 usagePage) → IRoot
-  getFeature(0x1814) 인덱스 조회 → 0x1814 func0 getHostInfo(호스트 개수·현재 호스트) →
-  기기 이름(0x0005). 직접(0xFF)·리시버(1~6) 전수 핑, 마우스·키보드 등 여러 기기 모두.
-- short 전용 인터페이스는 7바이트 short 리포트(0x10)로, long 인터페이스는 20바이트
-  long 리포트(0x11)로 자동 분기. 중복 기기는 이름+index+연결 기준으로 합친다.
-- **안전 불변식: 쓰기(func1 setHost) 절대 안 함. 읽기(func0·0x0000·0x0005)만.
-  모르는 명령 전송 금지. 쓰기 경로는 코드에 넣지 않는다.**
-- 설계 메모(다음 판): 전환은 마우스·키보드 등 모든 Easy-Switch 기기를 같은 채널로
-  함께 전환(엣지 1회에 모두). 이번 판엔 읽기만.
+- 진단: HID++ 기기 열거(long 0x0202 + short 0x0201 + 벤더 usagePage) → IRoot
+  getFeature(0x1814) 인덱스 조회 → 0x1814 func0 getHostInfo → 기기 이름(0x0005).
+  직접(0xFF)·리시버(1~6) 전수 핑. short/long 리포트 자동 분기. 중복 기기 합침.
+- 목록 정리: 전환 가능(0x1814 지원) 기기만 기본 표시. 빈 슬롯·리시버 자신은 숨김.
+  "모두 보기(진단)" 토글(기본 끔)로 전체 열람.
+- 전환 테스트: 「채널 N로 전환」 버튼 → 전환 가능한 모든 기기에 각자 setHost(targetIndex)
+  전송(마우스·키보드가 같은 PC 로 함께 이동). 기기별 개별 전환 버튼도 있음.
+- **안전 불변식(통제된 쓰기): 쓰기는 0x1814 func1 setHost 하나뿐이며, (a)0x1814 지원
+  확인된 기기 (b)targetHost 가 0~hostCount-1 범위 (c)명시적 전환 버튼 클릭 — 이 3조건에서만
+  호출한다. 그 외 쓰기(SetFeature·SetOutputReport·모르는 func) 금지. setHost 는
+  `HostSwitcher` 를 통해서만, TX 바이트는 진단 로그에 남긴다.**
+- 설계 메모(다음 판): 전환을 엣지 감지(모니터 캔버스·LocalDex 재사용)로 자동화. 이번 판은 수동 버튼까지.
 
 ## 스택 / 빌드
 

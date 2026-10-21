@@ -1,8 +1,11 @@
+using LogiFlow.Hid;
+
 namespace LogiFlow.Diagnostics
 {
     /// <summary>발견된 HID++ 장치 1개(= 인터페이스 × deviceIndex)의 진단 결과.</summary>
     internal sealed class ScanResult
     {
+        public HidInterfaceInfo Interface;  // 전환(setHost) 시 스트림 재오픈용
         public string DeviceName;          // HID++ 0x0005 또는 Windows 제품 문자열
         public string VidPid;              // 046D:XXXX
         public string Path;                // HID 인터페이스 경로

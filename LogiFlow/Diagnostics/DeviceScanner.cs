@@ -171,6 +171,7 @@ namespace LogiFlow.Diagnostics
         {
             var r = new ScanResult
             {
+                Interface = iface,
                 VidPid = iface.VidPid,
                 Path = iface.Path,
                 DeviceIndex = deviceIndex,
