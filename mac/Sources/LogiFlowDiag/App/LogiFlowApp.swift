@@ -10,7 +10,6 @@ struct LogiFlowApp: App {
             ContentView()
                 .frame(minWidth: 720, minHeight: 440)
         }
-        .windowStyle(.automatic)
     }
 }
 

@@ -39,8 +39,9 @@ final class HidDevice {
     }
 
     /// 공유 모드(seize 아님)로 연다 — Logi Options+ 등 다른 앱과 충돌하지 않게.
+    /// 옵션 0 = kIOHIDOptionsTypeNone(공유). seize(0x01)는 쓰지 않는다.
     func open() -> Bool {
-        let r = IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
+        let r = IOHIDDeviceOpen(device, 0)
         guard r == kIOReturnSuccess else { return false }
 
         let ctx = Unmanaged.passUnretained(self).toOpaque()
@@ -58,13 +59,23 @@ final class HidDevice {
         return true
     }
 
-    /// 입력 리포트 수신 콜백(HidRunLoop 스레드에서 실행). macOS 는 reportID 를 별도 인자로
-    /// 주고 버퍼에는 ID 를 뺀 데이터만 담으므로, 윈도우 프레임과 동일하게 [ID]+데이터로 복원한다.
+    /// 입력 리포트 수신 콜백(HidRunLoop 스레드에서 실행).
+    /// 윈도우 프레임과 동일하게 **항상 [리포트ID]+데이터** 꼴로 복원한다(resp[0]=ID, resp[1]=deviceIndex…).
+    ///
+    /// macOS IOKit 버전/기기에 따라 콜백 버퍼가 리포트 ID 를 "포함"하거나 "제외"한다(출처가 갈림).
+    /// HID++ 리포트 ID 는 0x10/0x11 뿐이고 deviceIndex 는 0x01~0x06·0xFF 뿐이라 겹치지 않으므로:
+    ///  - 버퍼 첫 바이트가 0x10/0x11 이면 이미 ID 포함 → 그대로 사용.
+    ///  - 아니면 ID 가 빠진 것 → 콜백의 reportID 를 앞에 붙인다.
     private func onInput(reportID: UInt32, report: UnsafeMutablePointer<UInt8>?, length: CFIndex) {
-        var frame = [UInt8]()
-        frame.append(UInt8(reportID & 0xFF))
+        var data = [UInt8]()
         if let report = report, length > 0 {
-            frame.append(contentsOf: UnsafeBufferPointer(start: report, count: Int(length)))
+            data = Array(UnsafeBufferPointer(start: report, count: Int(length)))
+        }
+        var frame: [UInt8]
+        if let first = data.first, first == HidppDevice.reportIdLong || first == HidppDevice.reportIdShort {
+            frame = data                       // 이미 ID 포함.
+        } else {
+            frame = [UInt8(reportID & 0xFF)] + data   // ID 선두에 복원.
         }
         cond.lock()
         frames.append(frame)
@@ -101,7 +112,7 @@ final class HidDevice {
     func close() {
         guard opened else { return }
         HidRunLoop.shared.unschedule(device)
-        IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone))
+        IOHIDDeviceClose(device, 0)
         opened = false
     }
 }
@@ -116,8 +127,8 @@ final class HidRunLoop {
     let mode = CFRunLoopMode.defaultMode
 
     private init() {
-        let thread = Thread { [weak self] in
-            guard let self = self else { return }
+        // 수명 싱글턴 — 강한 캡처로 초기화 중 nil 위험을 없앤다(순환은 앱 수명 동안 의도된 것).
+        let thread = Thread {
             self.runLoop = CFRunLoopGetCurrent()
             self.ready.signal()
             // 빈 런루프는 소스가 없으면 즉시 반환하므로, 깨어 있게 타이머 소스를 하나 건다.
@@ -133,6 +144,8 @@ final class HidRunLoop {
 
     func schedule(_ device: IOHIDDevice) {
         IOHIDDeviceScheduleWithRunLoop(device, runLoop, mode.rawValue)
+        // 다른 스레드에서 소스를 추가했으니 런루프를 깨워 즉시 반영되게 한다.
+        CFRunLoopWakeUp(runLoop)
     }
 
     func unschedule(_ device: IOHIDDevice) {

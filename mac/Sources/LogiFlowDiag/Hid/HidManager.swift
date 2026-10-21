@@ -11,7 +11,7 @@ enum HidManager {
     static func enumerate(vendorIdFilter: UInt16, usagePageFilter: UInt16) -> [HidInterfaceInfo] {
         var result = [HidInterfaceInfo]()
 
-        let mgr = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
+        let mgr = IOHIDManagerCreate(kCFAllocatorDefault, 0)
         // 매칭 딕셔너리로 VID 만 1차 필터(나머지는 코드에서).
         if vendorIdFilter != 0 {
             let match: [String: Any] = [kIOHIDVendorIDKey: Int(vendorIdFilter)]
@@ -41,7 +41,7 @@ enum HidManager {
     /// 열거에서 쓴 IOHIDDevice 참조를 그대로 재사용한다.
     static func openDevices(vendorIdFilter: UInt16) -> [(HidInterfaceInfo, IOHIDDevice)] {
         var out = [(HidInterfaceInfo, IOHIDDevice)]()
-        let mgr = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
+        let mgr = IOHIDManagerCreate(kCFAllocatorDefault, 0)
         if vendorIdFilter != 0 {
             IOHIDManagerSetDeviceMatching(mgr, [kIOHIDVendorIDKey: Int(vendorIdFilter)] as CFDictionary)
         } else {
@@ -56,22 +56,15 @@ enum HidManager {
         return out
     }
 
+    // CFNumber → NSNumber, CFString → String 토막 브리징(강제 캐스트 없이 안전).
     private static func intProp(_ device: IOHIDDevice, _ key: String) -> Int? {
         guard let ref = IOHIDDeviceGetProperty(device, key as CFString) else { return nil }
-        if CFGetTypeID(ref) == CFNumberGetTypeID() {
-            var value = 0
-            CFNumberGetValue((ref as! CFNumber), .sInt64Type, &value)
-            return value
-        }
-        return nil
+        return (ref as? NSNumber)?.intValue
     }
 
     private static func stringProp(_ device: IOHIDDevice, _ key: String) -> String? {
         guard let ref = IOHIDDeviceGetProperty(device, key as CFString) else { return nil }
-        if CFGetTypeID(ref) == CFStringGetTypeID() {
-            return (ref as! CFString) as String
-        }
-        return nil
+        return ref as? String
     }
 
     private static func readInterface(_ device: IOHIDDevice) -> HidInterfaceInfo {
@@ -92,7 +85,7 @@ enum HidManager {
         info.capsRead = info.usagePage != 0 || info.inputReportByteLength > 0
 
         // 합성 경로(locationID + usage) — 윈도우의 디바이스 경로 대용.
-        let loc = intProp(device, kIOHIDLocationIDKey) ?? 0
+        let loc = UInt32(truncatingIfNeeded: intProp(device, kIOHIDLocationIDKey) ?? 0)
         info.path = String(format: "loc=%08X:up=%04X:u=%04X:pid=%04X",
                            loc, info.usagePage, info.usage, info.productId)
         return info
