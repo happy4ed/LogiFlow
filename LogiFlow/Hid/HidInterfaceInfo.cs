@@ -11,6 +11,7 @@ namespace LogiFlow.Hid
         public int InputReportByteLength;
         public int OutputReportByteLength;
         public string ProductString;
+        public bool CapsRead;   // caps/attrs 를 실제로 읽었는지(false면 경로에서만 추출)
 
         public string VidPid
         {

@@ -38,7 +38,8 @@ namespace LogiFlow.Diagnostics
             List<HidInterfaceInfo> interfaces;
             try
             {
-                interfaces = HidEnumerator.Enumerate(LogitechVid, HidppUsagePage);
+                // usagePage 필터 없이 VID 046D 인터페이스를 전부 가져와 진단에 남긴다.
+            interfaces = HidEnumerator.Enumerate(LogitechVid, 0);
             }
             catch (Exception ex)
             {
@@ -46,17 +47,22 @@ namespace LogiFlow.Diagnostics
                 return results;
             }
 
-            _log.Log(string.Format("로지텍 HID++ 인터페이스 {0}개 발견", interfaces.Count));
+            _log.Log(string.Format("로지텍(VID 046D) HID 인터페이스 {0}개 발견", interfaces.Count));
             foreach (var iface in interfaces)
             {
-                _log.Log(string.Format("  iface {0} usage=0x{1:X4} in={2} out={3} path={4}",
-                    iface.VidPid, iface.Usage, iface.InputReportByteLength, iface.OutputReportByteLength, iface.Path));
+                _log.Log(string.Format("  iface {0} usagePage=0x{1:X4} usage=0x{2:X4} in={3} out={4} caps={5} path={6}",
+                    iface.VidPid, iface.UsagePage, iface.Usage, iface.InputReportByteLength,
+                    iface.OutputReportByteLength, iface.CapsRead ? "ok" : "unread", iface.Path));
             }
 
             foreach (var iface in interfaces)
             {
-                // HID++ long 컬렉션(0x0202)에서만 프레임을 주고받는다.
-                if (iface.Usage != UsageLong)
+                // HID++ 후보: 벤더 컬렉션(usage 0x0202) 또는 벤더 usagePage(0xFFxx)에 20바이트
+                // 출력 리포트가 있는 인터페이스. caps 를 못 읽은 것은 다른 프로세스 선점이라 건너뜀.
+                bool candidate = iface.CapsRead &&
+                    (iface.Usage == UsageLong ||
+                     (iface.UsagePage >= 0xFF00 && iface.OutputReportByteLength >= 19));
+                if (!candidate)
                 {
                     continue;
                 }

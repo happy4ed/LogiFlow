@@ -49,13 +49,30 @@ namespace LogiFlow.Hid
                         continue;
                     }
 
-                    HidInterfaceInfo info = TryReadInterface(path);
-                    if (info == null)
+                    // 경로 문자열에서 먼저 VID/PID 를 뽑아 값싼 1차 필터(열기 전).
+                    ParseVidPidFromPath(path, out ushort pathVid, out ushort pathPid);
+                    if (vendorIdFilter != 0 && pathVid != 0 && pathVid != vendorIdFilter)
                     {
                         continue;
                     }
 
-                    if (vendorIdFilter != 0 && info.VendorId != vendorIdFilter)
+                    HidInterfaceInfo info = TryReadInterface(path);
+                    if (info == null)
+                    {
+                        // caps/attrs 를 못 읽어도(다른 프로세스가 선점 등) 버리지 않고
+                        // 경로에서 뽑은 최소 정보로 기록 — 진단에서 보이게 한다.
+                        info = new HidInterfaceInfo
+                        {
+                            Path = path,
+                            VendorId = pathVid,
+                            ProductId = pathPid,
+                            UsagePage = 0,
+                            Usage = 0,
+                            CapsRead = false,
+                        };
+                    }
+
+                    if (vendorIdFilter != 0 && info.VendorId != vendorIdFilter && pathVid != vendorIdFilter)
                     {
                         continue;
                     }
@@ -151,6 +168,7 @@ namespace LogiFlow.Hid
                     InputReportByteLength = caps.InputReportByteLength,
                     OutputReportByteLength = caps.OutputReportByteLength,
                     ProductString = ReadProductString(handle),
+                    CapsRead = true,
                 };
                 return info;
             }
@@ -158,6 +176,29 @@ namespace LogiFlow.Hid
             {
                 handle.Dispose();
             }
+        }
+
+        // 경로 예: \\?\hid#vid_046d&pid_c548&mi_01&col01#...  에서 vid/pid 추출.
+        private static void ParseVidPidFromPath(string path, out ushort vid, out ushort pid)
+        {
+            vid = 0;
+            pid = 0;
+            if (string.IsNullOrEmpty(path)) return;
+            string p = path.ToLowerInvariant();
+            vid = ExtractHex(p, "vid_");
+            pid = ExtractHex(p, "pid_");
+        }
+
+        private static ushort ExtractHex(string lowerPath, string key)
+        {
+            int i = lowerPath.IndexOf(key, StringComparison.Ordinal);
+            if (i < 0) return 0;
+            i += key.Length;
+            if (i + 4 > lowerPath.Length) return 0;
+            string hex = lowerPath.Substring(i, 4);
+            ushort val;
+            return ushort.TryParse(hex, System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture, out val) ? val : (ushort)0;
         }
 
         private static string ReadProductString(SafeFileHandle handle)
