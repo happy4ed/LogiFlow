@@ -1,0 +1,76 @@
+name: macOS build and release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/mac-release.yml'
+      - 'mac/**'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified macOS release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: swift --version && xcodebuild -version
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < mac/VERSION)"
+          if [[ ! "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then echo "Invalid version"; exit 1; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Build .app, zip, dmg and checksums
+        working-directory: mac
+        run: ./scripts/make-app.sh "${{ steps.version.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LogiFlow-macOS-${{ steps.version.outputs.version }}
+          path: |
+            mac/dist/LogiFlow-v*-mac.zip
+            mac/dist/LogiFlow-v*-mac.dmg
+            mac/dist/LogiFlow-v*-mac-SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: build
+    if: (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:')) || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: LogiFlow-macOS-${{ needs.build.outputs.version }}
+          path: release-assets
+      - name: Verify and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          (cd release-assets && shasum -a 256 --check "LogiFlow-v${VERSION}-mac-SHA256SUMS.txt")
+          gh release create "mac-v${VERSION}" release-assets/* \
+            --target "$COMMIT_SHA" --title "LogiFlow macOS ${VERSION}" \
+            --notes-file mac/docs/RELEASE_NOTES_mac_v0.1.0.md

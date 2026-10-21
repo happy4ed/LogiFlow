@@ -17,14 +17,12 @@ namespace LogiFlow
     /// </summary>
     internal sealed class MainForm : Form
     {
-        private const int ContentW = 700;
-
         private readonly TrayAppContext _tray;
         private AppConfig Config { get { return _tray.Config; } }
         private DiagLogger Log { get { return _tray.Log; } }
 
         private Panel _sidebar;
-        private Panel _pageHost;
+        private ThemedScrollPanel _pageHost;
         private NavButton _navSwitch, _navSettings, _navDiag;
         private int _pageIndex;
         private bool _busy;
@@ -41,21 +39,47 @@ namespace LogiFlow
             Text = "LogiFlow";
             Icon = AppIcon.Get();
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(900, 600);
-            MinimumSize = new Size(780, 560);
-            Font = new Font("Segoe UI", 9f);
+            ClientSize = new Size(900, 620);
+            MinimumSize = new Size(760, 560);
+            Font = UiFont.Get(10f);
 
             _sidebar = new Panel { Dock = DockStyle.Left, Width = 182, Padding = new Padding(12, 14, 12, 12) };
             BuildSidebar();
 
-            _pageHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+            _pageHost = new ThemedScrollPanel { Dock = DockStyle.Fill };
+            _pageHost.ViewportWidthChanged += (s, e) => ShowPage(_pageIndex);
 
             Controls.Add(_pageHost);
             Controls.Add(_sidebar);
 
             ApplyChrome();
             FormClosing += OnFormClosing;
+            UiFont.Changed += OnFontChanged;
             ShowPage(0);
+        }
+
+        private void OnFontChanged(object s, EventArgs e)
+        {
+            DeferRebuild();
+        }
+
+        // 테마/폰트 변경은 보통 활성 컨트롤(세그먼트)의 이벤트 중에 발생한다.
+        // 그 자리에서 재빌드하면 이벤트를 발생시킨 컨트롤이 dispose 되어 위험하므로 BeginInvoke 로 지연.
+        private void DeferRebuild()
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try
+            {
+                BeginInvoke((Action)(() =>
+                {
+                    if (IsDisposed) return;
+                    Font = UiFont.Get(10f);
+                    ApplyChrome();
+                    BuildSidebar();
+                    ShowPage(_pageIndex);
+                }));
+            }
+            catch { }
         }
 
         private void BuildSidebar()
@@ -65,7 +89,7 @@ namespace LogiFlow
 
             var brand = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(4, 2, 4, 2), BackColor = sb };
             var mark = new IconView(Icons.Mark, 18) { Left = 4, Top = 9, Tint = Theme.Accent };
-            var name = new Label { Text = "LogiFlow", Left = 30, Top = 8, AutoSize = true, Font = new Font("Segoe UI", 10f, FontStyle.Bold), ForeColor = Theme.Ink };
+            var name = new Label { Text = "LogiFlow", Left = 30, Top = 8, AutoSize = true, Font = UiFont.Get(10f, FontStyle.Bold), ForeColor = Theme.Ink };
             brand.Controls.Add(mark);
             brand.Controls.Add(name);
 
@@ -86,7 +110,7 @@ namespace LogiFlow
             var status = new Panel { Dock = DockStyle.Bottom, Height = 32, BackColor = sb };
             var plug = new IconView(Icons.Plug, 16) { Left = 6, Top = 8, Tint = Theme.Muted };
             var dot = new IconView((g, r, c) => { using (var b = new SolidBrush(Theme.Ok)) g.FillEllipse(b, r.X, r.Y + r.Height / 2 - 3.5f, 7, 7); }, 16) { Left = 26, Top = 8 };
-            var slabel = new Label { Text = "LogiFlow 실행 중", Left = 42, Top = 7, AutoSize = true, ForeColor = Theme.Muted, Font = new Font("Segoe UI", 8.5f) };
+            var slabel = new Label { Text = "LogiFlow 실행 중", Left = 42, Top = 7, AutoSize = true, ForeColor = Theme.Muted, Font = UiFont.Get(8.5f) };
             status.Controls.Add(plug);
             status.Controls.Add(dot);
             status.Controls.Add(slabel);
@@ -100,7 +124,7 @@ namespace LogiFlow
 
         private NavButton MakeNav(string text, IconPaint icon, int index)
         {
-            var nav = new NavButton(text, icon) { Font = new Font("Segoe UI", 9.5f) };
+            var nav = new NavButton(text, icon) { Font = UiFont.Get(9.5f) };
             nav.Selected += (s, e) => ShowPage(index);
             return nav;
         }
@@ -127,10 +151,7 @@ namespace LogiFlow
 
         private void OnThemeChanged(object s, EventArgs e)
         {
-            if (IsDisposed) return;
-            ApplyChrome();
-            BuildSidebar();
-            ShowPage(_pageIndex);
+            DeferRebuild();
         }
 
         private static void DisposeChildren(Control host)
@@ -145,39 +166,39 @@ namespace LogiFlow
         {
             _pageIndex = index;
             UpdateNavActive();
-            DisposeChildren(_pageHost);
+            int vw = Math.Max(500, _pageHost.ViewportWidth);
             Panel page;
             switch (index)
             {
-                case 1: page = BuildSettingsPage(); break;
-                case 2: page = BuildDiagPage(); break;
-                default: page = BuildSwitchPage(); break;
+                case 1: page = BuildSettingsPage(vw); break;
+                case 2: page = BuildDiagPage(vw); break;
+                default: page = BuildSwitchPage(vw); break;
             }
             page.Location = new Point(0, 0);
-            _pageHost.Controls.Add(page);
+            _pageHost.SetContent(page);
         }
 
         // ---- 공통 빌더 ----
         private Label Title(string text)
         {
-            return new Label { Text = text, AutoSize = true, Font = new Font("Segoe UI", 14f, FontStyle.Bold), ForeColor = Theme.Ink };
+            return new Label { Text = text, AutoSize = true, Font = UiFont.Get(14f, FontStyle.Bold), ForeColor = Theme.Ink };
         }
 
         private Label Sub(string text)
         {
-            return new Label { Text = text, AutoSize = true, Font = new Font("Segoe UI", 9f), ForeColor = Theme.Muted };
+            return new Label { Text = text, AutoSize = true, Font = UiFont.Get(9f), ForeColor = Theme.Muted };
         }
 
         private Label SectionLabel(string text, string small)
         {
-            var l = new Label { AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), ForeColor = Theme.Ink };
+            var l = new Label { AutoSize = true, Font = UiFont.Get(9.5f, FontStyle.Bold), ForeColor = Theme.Ink };
             l.Text = small != null ? text + "   " + small : text;
             return l;
         }
 
         private Label GroupHead(string text)
         {
-            return new Label { Text = text.ToUpper(), AutoSize = true, Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = Theme.Muted };
+            return new Label { Text = text.ToUpper(), AutoSize = true, Font = UiFont.Get(8f, FontStyle.Bold), ForeColor = Theme.Muted };
         }
 
         private Panel Card(int x, int y, int w, int h)
@@ -187,10 +208,10 @@ namespace LogiFlow
         }
 
         // ---- 전환 관리 ----
-        private Panel BuildSwitchPage()
+        private Panel BuildSwitchPage(int vw)
         {
-            var page = new Panel { Width = ContentW + 48, Padding = new Padding(24, 20, 24, 20), BackColor = Theme.Content };
-            int W = ContentW;
+            var page = new Panel { Width = vw, Padding = new Padding(24, 20, 24, 20), BackColor = Theme.Content };
+            int W = vw - 48;
             int y = 20;
 
             var title = Title("전환 관리"); title.Location = new Point(24, y); page.Controls.Add(title);
@@ -199,7 +220,8 @@ namespace LogiFlow
             page.Controls.Add(refresh);
             y += 58;
 
-            var canvas = new MonitorLayoutPanel { Left = 24, Top = y, Width = W, Height = 240 };
+            int canvasH = 320;
+            var canvas = new MonitorLayoutPanel { Left = 24, Top = y, Width = W, Height = canvasH };
             int maxHost = _tray.MaxHostCount();
             int current = _tray.CurrentChannel();
             var channels = new List<int>();
@@ -212,7 +234,7 @@ namespace LogiFlow
                 _tray.ApplyConfig();
             };
             page.Controls.Add(canvas);
-            y += 240 + 14;
+            y += canvasH + 14;
 
             // 채널 별칭
             var aliasLbl = SectionLabel("채널 별칭", "엣지에 둘 다른 PC 를 알아보기 쉽게"); aliasLbl.Location = new Point(24, y); page.Controls.Add(aliasLbl);
@@ -261,8 +283,8 @@ namespace LogiFlow
         private Panel BuildAliasChip(int channel)
         {
             var chip = new ThemedCard { Height = 30, Padding = new Padding(8, 0, 8, 0) };
-            var cn = new Label { Text = "채널 " + (channel + 1), AutoSize = true, Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = Theme.Accent, Top = 7, Left = 8 };
-            var al = new Label { Text = Config.AliasFor(channel), AutoSize = true, Font = new Font("Segoe UI", 8.5f), ForeColor = Theme.Ink, Top = 7 };
+            var cn = new Label { Text = "채널 " + (channel + 1), AutoSize = true, Font = UiFont.Get(8f, FontStyle.Bold), ForeColor = Theme.Accent, Top = 7, Left = 8 };
+            var al = new Label { Text = Config.AliasFor(channel), AutoSize = true, Font = UiFont.Get(8.5f), ForeColor = Theme.Ink, Top = 7 };
             al.Left = cn.Right + 8;
             var pen = new ThemedButton { Variant = ButtonVariant.Icon, Icon = Icons.Pencil, Width = 24, Height = 22, Top = 4 };
             pen.Left = al.Right + 6;
@@ -291,7 +313,7 @@ namespace LogiFlow
             bool isKeyboard = d.DeviceName != null && d.DeviceName.IndexOf("keyboard", StringComparison.OrdinalIgnoreCase) >= 0
                 || (d.DeviceName != null && (d.DeviceName.IndexOf("Mechanical", StringComparison.OrdinalIgnoreCase) >= 0 || d.DeviceName.IndexOf("Keys", StringComparison.OrdinalIgnoreCase) >= 0));
             var icon = new IconView(isKeyboard ? (IconPaint)Icons.Keyboard : Icons.Mouse, 18) { Left = 2, Top = 13, Tint = Theme.Muted };
-            var name = new Label { Text = d.DeviceName, AutoSize = true, Font = new Font("Segoe UI", 9.5f), ForeColor = Theme.Ink, Left = 30, Top = 13 };
+            var name = new Label { Text = d.DeviceName, AutoSize = true, Font = UiFont.Get(9.5f), ForeColor = Theme.Ink, Left = 30, Top = 13 };
 
             string chText = d.CurrentHost >= 0 ? Config.AliasFor(d.CurrentHost) : "?";
             var badge = new ThemedBadge { Text = "채널 " + (d.CurrentHost >= 0 ? (d.CurrentHost + 1).ToString() : "?"), Left = w - 220, Top = 10, Height = 24, AutoWidth = true };
@@ -328,9 +350,9 @@ namespace LogiFlow
             foot.Controls.Add(top);
 
             var edgeIcon = new IconView(Icons.Edge, 16) { Left = 0, Top = 16, Tint = Theme.Muted };
-            var edgeLbl = new Label { Text = "가장자리 자동 전환", AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), ForeColor = Theme.Ink, Left = 24, Top = 15 };
+            var edgeLbl = new Label { Text = "가장자리 자동 전환", AutoSize = true, Font = UiFont.Get(9.5f, FontStyle.Bold), ForeColor = Theme.Ink, Left = 24, Top = 15 };
 
-            var dwellLbl = new Label { Text = "대기", AutoSize = true, ForeColor = Theme.Muted, Font = new Font("Segoe UI", 8.5f), Top = 18 };
+            var dwellLbl = new Label { Text = "대기", AutoSize = true, ForeColor = Theme.Muted, Font = UiFont.Get(8.5f), Top = 18 };
             var dwellBtn = new ThemedButton { Text = DwellText(Config.DwellMs), Icon = null, Width = 78, Height = 26, Top = 14 };
             dwellBtn.Click += (s, e) => ShowDwellMenu(dwellBtn);
             var edgeToggle = new ThemedToggle { Checked = Config.EdgeSwitchEnabled, Top = 20 };
@@ -340,7 +362,7 @@ namespace LogiFlow
             foot.Controls.Add(edgeIcon); foot.Controls.Add(edgeLbl); foot.Controls.Add(dwellLbl); foot.Controls.Add(dwellBtn); foot.Controls.Add(edgeToggle);
 
             var guardChk = new ThemedToggle { Checked = Config.DragGuard, Top = 54 };
-            var guardLbl = new Label { Text = "드래그 중 전환 안 함", AutoSize = true, ForeColor = Theme.Ink, Font = new Font("Segoe UI", 8.5f), Left = 34, Top = 56 };
+            var guardLbl = new Label { Text = "드래그 중 전환 안 함", AutoSize = true, ForeColor = Theme.Ink, Font = UiFont.Get(8.5f), Left = 34, Top = 56 };
             guardChk.Left = 0;
             guardChk.CheckedChanged += (s, e) => { Config.DragGuard = guardChk.Checked; _tray.ApplyConfig(); };
 
@@ -371,18 +393,20 @@ namespace LogiFlow
         }
 
         // ---- 설정 ----
-        private Panel BuildSettingsPage()
+        private Panel BuildSettingsPage(int vw)
         {
-            var page = new Panel { Width = ContentW + 48, BackColor = Theme.Content };
-            int W = ContentW;
+            var page = new Panel { Width = vw, BackColor = Theme.Content };
+            int W = vw - 48;
             int y = 20;
             var title = Title("설정"); title.Location = new Point(24, y); page.Controls.Add(title);
             var sub = Sub("실행과 로그를 관리"); sub.Location = new Point(24, y + 28); page.Controls.Add(sub);
             y += 60;
 
-            var g1 = GroupHead("테마"); g1.Location = new Point(24, y); page.Controls.Add(g1); y += 22;
-            var themeCard = Card(24, y, W, 56);
-            var seg = new SegmentedControl { Left = W - 230, Top = 13, Width = 216, Height = 30 };
+            var g1 = GroupHead("모양"); g1.Location = new Point(24, y); page.Controls.Add(g1); y += 22;
+            var themeCard = Card(24, y, W, 2 * 66);
+
+            // 테마
+            var seg = new SegmentedControl { Left = W - 246, Top = 17, Width = 224, Height = 34 };
             seg.SetItems(new[] { "시스템", "라이트", "다크" }, (int)Config.Theme);
             seg.SelectedChanged += (s, e) =>
             {
@@ -390,10 +414,26 @@ namespace LogiFlow
                 Theme.SetMode(Config.Theme);
                 _tray.ApplyConfig();
             };
-            themeCard.Controls.Add(MakeRowLabel("테마", "시스템 설정을 따르거나 라이트·다크로 고정합니다.", 14));
+            themeCard.Controls.Add(MakeRowLabel("테마", "시스템 설정을 따르거나 라이트·다크로 고정합니다.", 16));
             themeCard.Controls.Add(seg);
+            themeCard.Controls.Add(new Panel { Left = 16, Top = 66, Width = W - 32, Height = 1, BackColor = Theme.Divider });
+
+            // 글자 크기
+            var segFont = new SegmentedControl { Left = W - 246, Top = 83, Width = 224, Height = 34 };
+            int fontIdx = Config.FontScalePercent >= 140 ? 2 : (Config.FontScalePercent >= 120 ? 1 : 0);
+            segFont.SetItems(new[] { "보통", "크게", "아주 크게" }, fontIdx);
+            segFont.SelectedChanged += (s, e) =>
+            {
+                int pct = segFont.SelectedIndex == 2 ? 140 : (segFont.SelectedIndex == 1 ? 120 : 100);
+                Config.FontScalePercent = pct;
+                UiFont.SetPercent(pct);
+                _tray.ApplyConfig();
+            };
+            themeCard.Controls.Add(MakeRowLabel("글자 크기", "작은 글자가 안 보이면 키우세요. 최소 크기 이상은 항상 보장됩니다.", 82));
+            themeCard.Controls.Add(segFont);
+
             page.Controls.Add(themeCard);
-            y += 56 + 16;
+            y += 2 * 66 + 16;
 
             var g2 = GroupHead("실행"); g2.Location = new Point(24, y); page.Controls.Add(g2); y += 22;
             var runCard = Card(24, y, W, 2 * 60);
@@ -425,8 +465,8 @@ namespace LogiFlow
         private Control MakeRowLabel(string lab, string desc, int top)
         {
             var p = new Panel { Left = 16, Top = top, Width = 420, Height = 40, BackColor = Theme.Section };
-            var l1 = new Label { Text = lab, AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), ForeColor = Theme.Ink, Left = 0, Top = 0 };
-            var l2 = new Label { Text = desc, AutoSize = false, Font = new Font("Segoe UI", 8.5f), ForeColor = Theme.Muted, Left = 0, Top = 19, Width = 440, Height = 18 };
+            var l1 = new Label { Text = lab, AutoSize = true, Font = UiFont.Get(9.5f, FontStyle.Bold), ForeColor = Theme.Ink, Left = 0, Top = 0 };
+            var l2 = new Label { Text = desc, AutoSize = false, Font = UiFont.Get(8.5f), ForeColor = Theme.Muted, Left = 0, Top = 19, Width = 440, Height = 18 };
             p.Controls.Add(l1); p.Controls.Add(l2);
             return p;
         }
@@ -434,14 +474,14 @@ namespace LogiFlow
         private void AddSettingRow(Panel card, int top, string lab, string desc, bool advanced, bool on, Action<bool> onChange)
         {
             var row = new Panel { Left = 0, Top = top, Width = card.Width, Height = 60, BackColor = Theme.Section };
-            var l1 = new Label { Text = lab, AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), ForeColor = Theme.Ink, Left = 16, Top = 12 };
+            var l1 = new Label { Text = lab, AutoSize = true, Font = UiFont.Get(9.5f, FontStyle.Bold), ForeColor = Theme.Ink, Left = 16, Top = 12 };
             row.Controls.Add(l1);
             if (advanced)
             {
                 var adv = new ThemedBadge { Text = "고급", Left = l1.Right + 8, Top = 11, Height = 18, AutoWidth = true, UseAccent = true };
                 row.Controls.Add(adv);
             }
-            var l2 = new Label { Text = desc, AutoSize = false, Font = new Font("Segoe UI", 8.5f), ForeColor = Theme.Muted, Left = 16, Top = 32, Width = card.Width - 90, Height = 18 };
+            var l2 = new Label { Text = desc, AutoSize = false, Font = UiFont.Get(8.5f), ForeColor = Theme.Muted, Left = 16, Top = 32, Width = card.Width - 90, Height = 18 };
             row.Controls.Add(l2);
             var tg = new ThemedToggle { Checked = on, Left = card.Width - 44, Top = 22 };
             tg.CheckedChanged += (s, e) => onChange(tg.Checked);
@@ -455,16 +495,16 @@ namespace LogiFlow
         }
 
         // ---- 진단 ----
-        private Panel BuildDiagPage()
+        private Panel BuildDiagPage(int vw)
         {
-            var page = new Panel { Width = ContentW + 48, BackColor = Theme.Content };
-            int W = ContentW;
+            var page = new Panel { Width = vw, BackColor = Theme.Content };
+            int W = vw - 48;
             int y = 20;
             var title = Title("진단"); title.Location = new Point(24, y); page.Controls.Add(title);
             var sub = Sub("기기별 채널·전환 인덱스 확인"); sub.Location = new Point(24, y + 28); page.Controls.Add(sub);
 
             var showAll = new ThemedToggle { Checked = _showAllDiag, Top = y + 4 };
-            var showAllLbl = new Label { Text = "모두 보기", AutoSize = true, ForeColor = Theme.Ink, Font = new Font("Segoe UI", 8.5f), Top = y + 6 };
+            var showAllLbl = new Label { Text = "모두 보기", AutoSize = true, ForeColor = Theme.Ink, Font = UiFont.Get(8.5f), Top = y + 6 };
             var refreshBtn = new ThemedButton { Text = "새로 고침", Icon = Icons.Refresh, Width = 104, Height = 28, Top = y };
             var logBtn = new ThemedButton { Text = "로그 폴더 열기", Icon = Icons.Folder, Width = 128, Height = 28, Top = y };
             logBtn.Left = 24 + W - 128; refreshBtn.Left = logBtn.Left - 112; showAll.Left = refreshBtn.Left - 40; showAllLbl.Left = showAll.Left - 56;
@@ -496,7 +536,7 @@ namespace LogiFlow
             y += 6;
 
             var noteIcon = new IconView(Icons.Plug, 14) { Left = 24, Top = y + 1, Tint = Theme.Muted };
-            var note = new Label { Text = "기기 정보는 저장되어 매번 재검색하지 않음 · \"모두 보기\"를 켜면 빈 슬롯·리시버도 함께 표시", AutoSize = true, ForeColor = Theme.Muted, Font = new Font("Segoe UI", 8.5f), Left = 44, Top = y };
+            var note = new Label { Text = "기기 정보는 저장되어 매번 재검색하지 않음 · \"모두 보기\"를 켜면 빈 슬롯·리시버도 함께 표시", AutoSize = true, ForeColor = Theme.Muted, Font = UiFont.Get(8.5f), Left = 44, Top = y };
             page.Controls.Add(noteIcon); page.Controls.Add(note);
             y += 40;
 
@@ -521,7 +561,7 @@ namespace LogiFlow
 
         private void AddCol(Panel p, string text, int x, int wcol)
         {
-            p.Controls.Add(new Label { Text = text, AutoSize = false, Width = wcol, Height = 18, Left = x, Top = 4, Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = Theme.Muted });
+            p.Controls.Add(new Label { Text = text, AutoSize = false, Width = wcol, Height = 18, Left = x, Top = 4, Font = UiFont.Get(8f, FontStyle.Bold), ForeColor = Theme.Muted });
         }
 
         private Panel BuildDiagRow(ScanResult r, int w)
@@ -529,7 +569,7 @@ namespace LogiFlow
             var p = new Panel { Width = w, Height = 40, BackColor = Theme.Content };
             bool isKeyboard = r.DeviceName != null && (r.DeviceName.IndexOf("Mechanical", StringComparison.OrdinalIgnoreCase) >= 0 || r.DeviceName.IndexOf("Keys", StringComparison.OrdinalIgnoreCase) >= 0 || r.DeviceName.IndexOf("keyboard", StringComparison.OrdinalIgnoreCase) >= 0);
             var icon = new IconView(isKeyboard ? (IconPaint)Icons.Keyboard : Icons.Mouse, 17) { Left = 0, Top = 11, Tint = Theme.Muted };
-            var name = new Label { Text = r.DeviceName, AutoSize = false, Width = (int)(w * 0.30) - 26, Height = 18, Left = 26, Top = 11, Font = new Font("Segoe UI", 9f), ForeColor = Theme.Ink };
+            var name = new Label { Text = r.DeviceName, AutoSize = false, Width = (int)(w * 0.30) - 26, Height = 18, Left = 26, Top = 11, Font = UiFont.Get(9f), ForeColor = Theme.Ink };
             p.Controls.Add(icon); p.Controls.Add(name);
             p.Controls.Add(ColLabel(r.VidPid, (int)(w * 0.30), (int)(w * 0.18), Theme.Muted));
             p.Controls.Add(ColLabel(r.ConnectionType, (int)(w * 0.48), (int)(w * 0.22), Theme.Ink));
@@ -543,7 +583,7 @@ namespace LogiFlow
 
         private Label ColLabel(string text, int x, int wcol, Color c)
         {
-            return new Label { Text = text, AutoSize = false, Width = wcol, Height = 18, Left = x, Top = 11, Font = new Font("Segoe UI", 9f), ForeColor = c };
+            return new Label { Text = text, AutoSize = false, Width = wcol, Height = 18, Left = x, Top = 11, Font = UiFont.Get(9f), ForeColor = c };
         }
 
         // ---- 전환 동작 ----
@@ -611,7 +651,11 @@ namespace LogiFlow
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) Theme.Changed -= OnThemeChanged;
+            if (disposing)
+            {
+                Theme.Changed -= OnThemeChanged;
+                UiFont.Changed -= OnFontChanged;
+            }
             base.Dispose(disposing);
         }
     }

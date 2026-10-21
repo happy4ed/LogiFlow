@@ -239,21 +239,21 @@ namespace LogiFlow
             Icons.Monitor(g, new RectangleF(r.X + (r.Width - gs) / 2, r.Y + (r.Height - gs) / 2, gs, gs),
                 auto ? Theme.Accent : Theme.Muted);
 
-            // 라벨: 별칭 + 자동/수동.
+            // 라벨: 별칭 + 자동/수동. UiFont.Get 은 캐시 폰트라 dispose 하지 않는다.
             string alias = _aliasFor(box.Channel);
             string line = string.Format("채널 {0} · {1}", box.Channel + 1, alias);
-            using (var f = new Font(Font.FontFamily, 8.5f, FontStyle.Bold))
+            Font fTitle = UiFont.Get(11f, FontStyle.Bold);
             using (var fb = new SolidBrush(Theme.Ink))
-                g.DrawString(line, f, fb, r.X, r.Y - 16);
-            using (var f = new Font(Font.FontFamily, 8f))
+                g.DrawString(line, fTitle, fb, r.X, r.Y - fTitle.Height - 2);
+            Font fSub = UiFont.Get(10f);
             using (var fb = new SolidBrush(auto ? Theme.Accent : Theme.Muted))
-                g.DrawString(auto ? "접촉 · 자동" : "분리 · 수동", f, fb, r.X, r.Bottom + 2);
+                g.DrawString(auto ? "접촉 · 자동" : "분리 · 수동", fSub, fb, r.X, r.Bottom + 2);
         }
 
         private void DrawCentered(Graphics g, RectangleF rect, string text, Color color, FontStyle style, float dy)
         {
             if (string.IsNullOrEmpty(text)) return;
-            using (var f = new Font(Font.FontFamily, 8.5f, style))
+            Font f = UiFont.Get(10.5f, style);   // 캐시 폰트 — dispose 금지
             using (var b = new SolidBrush(color))
             using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
                 g.DrawString(text, f, b, new RectangleF(rect.X, rect.Y + dy, rect.Width, rect.Height), sf);

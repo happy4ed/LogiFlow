@@ -359,7 +359,7 @@ namespace LogiFlow.Ui
                      | ControlStyles.SupportsTransparentBackColor, true);
             BackColor = Color.Transparent;
             Height = 22;
-            Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+            Font = UiFont.Get(8.5f, FontStyle.Bold);
             Theme.Changed += OnTheme;
         }
 
