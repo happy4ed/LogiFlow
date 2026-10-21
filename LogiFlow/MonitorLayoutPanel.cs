@@ -77,15 +77,16 @@ namespace LogiFlow
                 }
                 _boxes.Add(box);
             }
-            ComputeVirtualAndScale();
+            ComputeVirtual();
             Invalidate();
         }
 
-        /// <summary>
-        /// 모니터 가상 경계(채널 박스가 변에 붙을 여백 포함)와 고정 스케일을 계산한다.
-        /// 스케일은 주 모니터가 보기 좋은 크기(≈180px)가 되도록 고정 — 모니터가 늘면 콘텐츠가 커져 스크롤된다.
-        /// </summary>
-        private void ComputeVirtualAndScale()
+        // 스케일 한계: 평소(모니터 1~3개)엔 뷰포트에 꼭 맞고, 아주 많아질 때만 최소 스케일로 내려가 스크롤된다.
+        private const double MinScale = 0.035;  // 이보다 작아지면 축소 대신 스크롤
+        private const double MaxScale = 0.16;   // 모니터 1개가 pane 을 꽉 채우지 않게
+
+        /// <summary>모니터 가상 경계(채널 박스가 변에 붙을 여백 포함)만 계산. 스케일은 RelayoutToHost 에서 뷰포트 기준.</summary>
+        private void ComputeVirtual()
         {
             if (_screens.Length == 0) { _vLeft = _vTop = 0; _vW = _vH = 1; return; }
 
@@ -100,24 +101,17 @@ namespace LogiFlow
             }
             int n = _screens.Length;
             double avgWo = sumWo / n, avgHo = sumHo / n;
-            // 변에 붙는 채널 박스(=모니터 1칸)와 라벨이 들어갈 여백(가로 1.2칸·세로 1.5칸).
+            // 변에 붙는 채널 박스(=모니터 1칸)와 라벨·미배치 트레이가 들어갈 여백(가로 1.2칸·세로 1.5칸).
             int marginX = (int)(avgWo * 1.2), marginY = (int)(avgHo * 1.5);
             vLeft -= marginX; vRight += marginX; vTop -= marginY; vBottom += marginY;
             _vLeft = vLeft; _vTop = vTop;
             _vW = Math.Max(1, vRight - vLeft);
             _vH = Math.Max(1, vBottom - vTop);
-
-            // 주 모니터 폭이 ≈180px 가 되도록 고정 스케일.
-            int primW = Math.Max(1, _screens[_primaryIndex].Bounds.Width);
-            double sc = 180.0 / primW;
-            if (sc < 0.02) sc = 0.02;
-            if (sc > 0.20) sc = 0.20;
-            _scale = sc;
         }
 
         /// <summary>
-        /// 호스트(AutoScroll 패널) 뷰포트 크기를 받아 자기 크기를 콘텐츠 크기와 뷰포트 중 큰 값으로 맞춘다.
-        /// 콘텐츠가 더 크면 호스트에 상하좌우 스크롤바가 생긴다.
+        /// 호스트(AutoScroll 패널) 뷰포트에 '꼭 맞는' 스케일을 구한다(평소 스크롤 없음). 다만 최소 스케일로
+        /// 바닥을 두어, 모니터가 아주 많아 그보다 작아져야 할 때만 콘텐츠가 뷰포트보다 커져 스크롤된다.
         /// </summary>
         public void RelayoutToHost(Size viewport)
         {
@@ -127,7 +121,14 @@ namespace LogiFlow
                 Invalidate();
                 return;
             }
-            if (_scale <= 0) ComputeVirtualAndScale();
+            ComputeVirtual();
+            double fitW = (viewport.Width - 2.0 * Pad) / _vW;
+            double fitH = (viewport.Height - 2.0 * Pad) / _vH;
+            double sc = Math.Min(fitW, fitH);
+            if (sc > MaxScale) sc = MaxScale;
+            if (sc < MinScale) sc = MinScale;   // 바닥에 닿으면 이제부터 스크롤
+            _scale = sc;
+
             int needW = (int)(_vW * _scale) + 2 * Pad;
             int needH = (int)(_vH * _scale) + 2 * Pad;
             Size = new Size(Math.Max(viewport.Width, needW), Math.Max(viewport.Height, needH));
@@ -184,8 +185,16 @@ namespace LogiFlow
             _monitorPanelRects.Clear();
             if (_screens.Length == 0) return;
 
-            if (_scale <= 0) ComputeVirtualAndScale();
-            // 고정 스케일로 그리고, 콘텐츠(가상*스케일)가 ClientSize 보다 작으면 가운데 정렬.
+            if (_scale <= 0)
+            {
+                // RelayoutToHost 이전에 그려지는 경우의 폴백 — ClientSize 에 맞춰 스케일 임시 산출.
+                ComputeVirtual();
+                double f = Math.Min((ClientSize.Width - 2.0 * Pad) / _vW, (ClientSize.Height - 2.0 * Pad) / _vH);
+                if (f > MaxScale) f = MaxScale;
+                if (f < MinScale) f = MinScale;
+                _scale = f;
+            }
+            // 스케일로 그리고, 콘텐츠(가상*스케일)가 ClientSize 보다 작으면 가운데 정렬.
             double drawnW = _vW * _scale, drawnH = _vH * _scale;
             double offX = Math.Max(Pad, (ClientSize.Width - drawnW) / 2.0);
             double offY = Math.Max(Pad, (ClientSize.Height - drawnH) / 2.0);
