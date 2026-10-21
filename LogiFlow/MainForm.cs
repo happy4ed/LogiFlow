@@ -279,17 +279,20 @@ namespace LogiFlow
             // 채널 별칭
             var aliasLbl = SectionLabel("채널 별칭", "엣지에 둘 다른 PC 를 알아보기 쉽게"); aliasLbl.Location = new Point(24, y); page.Controls.Add(aliasLbl);
             y += 24;
-            int ax = 24;
             int aliasCount = Math.Max(maxHost, 1);
+            const int aliasGap = 8;
+            int chipW = (W - (aliasCount - 1) * aliasGap) / aliasCount;   // 균등 폭 — 모든 칩 같은 크기
+            if (chipW < 110) chipW = 110;
+            int ax = 24;
             for (int ch = 0; ch < aliasCount; ch++)
             {
                 int channel = ch;
-                var chip = BuildAliasChip(channel);
+                var chip = BuildAliasChip(channel, chipW);
                 chip.Location = new Point(ax, y);
                 page.Controls.Add(chip);
-                ax += chip.Width + 8;
+                ax += chipW + aliasGap;
             }
-            y += 42;
+            y += 44;
 
             // 등록된 기기
             var devices = _tray.Switchable();
@@ -320,19 +323,21 @@ namespace LogiFlow
             return page;
         }
 
-        private Panel BuildAliasChip(int channel)
+        private Panel BuildAliasChip(int channel, int width)
         {
-            var chip = new ThemedCard { Height = 30, Padding = new Padding(8, 0, 8, 0) };
-            var cn = new Label { Text = "채널 " + (channel + 1), AutoSize = true, Font = UiFont.Get(8f, FontStyle.Bold), ForeColor = Theme.Accent, Top = 7, Left = 8 };
-            var al = new Label { Text = Config.AliasFor(channel), AutoSize = true, Font = UiFont.Get(8.5f), ForeColor = Theme.Ink, Top = 7 };
-            al.Left = cn.Right + 8;
-            var pen = new ThemedButton { Variant = ButtonVariant.Icon, Icon = Icons.Pencil, Width = 24, Height = 22, Top = 4 };
-            pen.Left = al.Right + 6;
+            var chip = new ThemedCard { Height = 32, Width = width };
+            Font fL = UiFont.Get(8f, FontStyle.Bold);
+            Font fN = UiFont.Get(8.5f);
+            string lab = "채널 " + (channel + 1);
+            int labW = TextRenderer.MeasureText(lab, fL).Width;
+            var cn = new Label { Text = lab, AutoSize = true, Font = fL, ForeColor = Theme.Accent, Top = 8, Left = 10 };
+            var pen = new ThemedButton { Variant = ButtonVariant.Icon, Icon = Icons.Pencil, Width = 24, Height = 22, Top = 5, Left = width - 24 - 8 };
             pen.Click += (s, e) => EditAlias(channel);
-            chip.Controls.Add(cn); chip.Controls.Add(al); chip.Controls.Add(pen);
-            chip.Width = pen.Right + 8;
-            // 칩 클릭도 편집.
+            int alLeft = 10 + labW + 10;
+            int alW = Math.Max(10, pen.Left - alLeft - 6);
+            var al = new Label { Text = Config.AliasFor(channel), AutoSize = false, Font = fN, ForeColor = Theme.Ink, Top = 8, Left = alLeft, Width = alW, Height = 18, AutoEllipsis = true };
             al.Click += (s, e) => EditAlias(channel);
+            chip.Controls.Add(cn); chip.Controls.Add(al); chip.Controls.Add(pen);
             return chip;
         }
 

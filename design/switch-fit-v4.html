@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LogiFlow 전환 관리 시안 v4</title>
+<style>
+  :root{
+    --content:#202022; --section:#29292C; --sidebar:#252527;
+    --ink:#ECECEF; --muted:#A4A4AA; --border:#3A3A3E; --divider:#333336;
+    --accent:#0A84FF; --accent-soft:rgba(10,132,255,.16);
+    --chip:#2E2E31; --canvas:#1C1C1E; --grid:#2A2A2D;
+    --mon:#2B2B2F; --mon-primary:#1E2A3A; --mon-stroke:#3A3A3E;
+    --pc-auto:rgba(10,132,255,.14); --pc-manual:#242427;
+    --sb:#3A3A3E; --sbh:#4A4A4E;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:"Segoe UI","Malgun Gothic",system-ui,sans-serif;}
+  body{background:#141416;display:flex;justify-content:center;padding:26px;}
+  .win{width:820px;height:700px;background:var(--content);border:1px solid var(--border);border-radius:10px;display:flex;overflow:hidden;color:var(--ink);}
+  .side{width:182px;background:var(--sidebar);padding:14px 12px;display:flex;flex-direction:column;gap:6px;flex:0 0 auto;}
+  .brand{display:flex;align-items:center;gap:8px;height:40px;font-weight:700;font-size:15px;}
+  .brand .logo{width:20px;height:14px;border:2px solid var(--accent);border-radius:4px;}
+  .nav{display:flex;flex-direction:column;gap:4px;margin-top:8px;}
+  .nav a{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border-radius:8px;color:var(--ink);font-size:13.5px;text-decoration:none;}
+  .nav a.active{background:var(--accent-soft);color:var(--accent);}
+  .nav a .i{width:18px;text-align:center;opacity:.8;}
+  .side .status{margin-top:auto;display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11.5px;}
+  .side .dot{width:7px;height:7px;border-radius:50%;background:#30d158;}
+  .main{flex:1;padding:20px 24px;overflow:hidden;}
+  .col{width:560px;}
+  h1{font-size:19px;font-weight:700;}
+  .sub{color:var(--muted);font-size:12.5px;margin-top:4px;}
+  .hdr{display:flex;align-items:flex-start;justify-content:space-between;}
+  .iconbtn{width:32px;height:30px;border:1px solid var(--border);background:var(--section);border-radius:7px;color:var(--muted);display:flex;align-items:center;justify-content:center;}
+
+  /* pane = 고정 뷰포트. 안의 그리드는 더 크고 스크롤됨(테마 스크롤바). */
+  .pane{width:560px;height:210px;margin-top:14px;background:var(--canvas);border:1px solid var(--border);border-radius:8px;position:relative;overflow:hidden;
+        background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:22px 22px;}
+  .mon{position:absolute;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-weight:700;font-size:13px;}
+  .mon small{font-weight:400;font-size:11px;}
+  .mon.m1{background:var(--mon);border:1.5px solid var(--mon-stroke);}
+  .mon.m2{background:var(--mon-primary);border:1.5px solid var(--accent);}
+  .mon .scr{color:var(--accent);font-size:20px;}
+  .box{position:absolute;border-radius:6px;display:flex;align-items:center;justify-content:center;}
+  .box.auto{background:var(--pc-auto);border:1.5px solid var(--accent);}
+  .box .scr{color:var(--accent);font-size:18px;}
+  .boxlabel{position:absolute;font-size:11px;font-weight:700;color:var(--ink);}
+  .boxsub{position:absolute;font-size:10.5px;color:var(--accent);}
+  /* 테마 스크롤바(그리드가 뷰포트보다 커서 생김) */
+  .sb-v{position:absolute;right:3px;top:5px;height:120px;width:6px;border-radius:3px;background:var(--sb);}
+  .sb-h{position:absolute;bottom:3px;left:5px;width:300px;height:6px;border-radius:3px;background:var(--sb);}
+
+  /* 미배치 채널 트레이 = pane 밖 고정 줄(절대 사라지지 않음) */
+  .tray{width:560px;margin-top:8px;height:58px;border:1px dashed var(--border);border-radius:8px;background:var(--section);display:flex;align-items:center;gap:10px;padding:0 12px;}
+  .tray .lbl{font-size:11px;color:var(--muted);}
+  .traybox{width:84px;height:40px;border:1.5px dashed var(--mon-stroke);background:var(--pc-manual);border-radius:6px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:grab;}
+  .traybox .scr{color:var(--muted);font-size:15px;}
+  .traybox b{color:var(--muted);font-size:11px;font-weight:700;}
+  .tray .empty{color:var(--muted);font-size:11px;opacity:.7;}
+
+  .seclabel{margin-top:16px;font-size:13px;font-weight:700;}
+  .seclabel span{color:var(--muted);font-weight:400;margin-left:10px;font-size:12px;}
+  .chips{display:flex;gap:8px;margin-top:10px;}
+  .chip{flex:1;height:34px;border:1px solid var(--border);background:var(--section);border-radius:8px;display:flex;align-items:center;gap:8px;padding:0 10px;}
+  .chip b{color:var(--accent);font-size:11px;}
+  .chip .nm{color:var(--ink);font-size:12px;}
+  .chip .pen{margin-left:auto;width:22px;height:22px;border:1px solid var(--border);border-radius:6px;color:var(--muted);display:flex;align-items:center;justify-content:center;font-size:11px;}
+
+  .dev{display:flex;align-items:center;height:42px;border-bottom:1px solid var(--divider);width:560px;}
+  .dev .ic{width:22px;color:var(--muted);text-align:center;}
+  .dev .nm{margin-left:8px;font-size:13px;}
+  .dev .badge{margin-left:auto;background:var(--chip);color:var(--muted);font-size:11px;font-weight:700;border-radius:11px;padding:4px 12px;}
+  .dev .sw{margin-left:14px;border:1px solid var(--border);background:var(--section);border-radius:7px;font-size:12px;color:var(--ink);padding:5px 16px;}
+  .foot{border-top:1px solid var(--divider);margin-top:10px;padding-top:12px;width:560px;}
+  .frow{display:flex;align-items:center;gap:10px;}
+  .frow .t{font-weight:700;font-size:13px;}
+  .frow .r{margin-left:auto;display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;}
+  .pill{width:40px;height:22px;border-radius:11px;background:var(--accent);position:relative;}
+  .pill::after{content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;top:2px;right:2px;}
+  .dwell{border:1px solid var(--border);background:var(--section);border-radius:7px;font-size:12px;color:var(--ink);padding:5px 12px;}
+  .frow2{display:flex;align-items:center;gap:10px;margin-top:10px;color:var(--ink);font-size:12px;}
+  .ghost{margin-left:auto;color:var(--accent);font-size:12px;}
+</style>
+</head>
+<body>
+  <div class="win">
+    <div class="side">
+      <div class="brand"><span class="logo"></span>LogiFlow</div>
+      <div class="nav">
+        <a class="active"><span class="i">⇄</span>전환 관리</a>
+        <a><span class="i">⚙</span>설정</a>
+        <a><span class="i">⎓</span>진단</a>
+      </div>
+      <div class="status"><span>🔌</span><span class="dot"></span>LogiFlow 실행 중</div>
+    </div>
+
+    <div class="main">
+      <div class="col">
+        <div class="hdr">
+          <div><h1>전환 관리</h1><div class="sub">화면 끝으로 밀면 자동 전환 · 떨어뜨리면 수동</div></div>
+          <div class="iconbtn">↻</div>
+        </div>
+
+        <!-- pane : 고정 크기 뷰포트. 안의 그리드는 더 크고 스크롤됨 -->
+        <div class="pane">
+          <div class="boxlabel" style="left:54px;top:42px;">채널 3 · Notebook</div>
+          <div class="box auto" style="left:54px;top:60px;width:98px;height:60px;"><span class="scr">🖥</span></div>
+          <div class="boxsub" style="left:54px;top:124px;">접촉 · 자동</div>
+          <div class="mon m2" style="left:162px;top:60px;width:138px;height:74px;">모니터 2<small>주 모니터</small><span class="scr">🖥</span></div>
+          <div class="mon m1" style="left:310px;top:60px;width:138px;height:74px;">모니터 1<span class="scr" style="color:var(--muted)">🖥</span></div>
+          <!-- 테마 스크롤바(그리드가 더 커서 생김) -->
+          <div class="sb-v"></div>
+          <div class="sb-h"></div>
+        </div>
+
+        <!-- 미배치 채널 트레이: pane 밖 고정 — 끌어서 pane 안 모니터 변에 붙임, 밖으로 빼면 여기로 돌아옴 -->
+        <div class="tray">
+          <span class="lbl">미배치 채널<br>(끌어 붙이기)</span>
+          <div class="traybox"><span class="scr">🖥</span><b>채널 2</b></div>
+          <span class="empty">· 모니터 변에서 떨어뜨리면 여기로 돌아옵니다</span>
+        </div>
+
+        <div class="seclabel">채널 별칭 <span>엣지에 둘 다른 PC 를 알아보기 쉽게</span></div>
+        <div class="chips">
+          <div class="chip"><b>채널 1</b><span class="nm">PC</span><span class="pen">✎</span></div>
+          <div class="chip"><b>채널 2</b><span class="nm">채널 2</span><span class="pen">✎</span></div>
+          <div class="chip"><b>채널 3</b><span class="nm">Notebook</span><span class="pen">✎</span></div>
+        </div>
+
+        <div class="seclabel">등록된 기기 <span>2개</span></div>
+        <div class="dev"><span class="ic">🖱</span><span class="nm">MX Master 4</span><span class="badge">채널 1</span><span class="sw">전환</span></div>
+        <div class="dev"><span class="ic">⌨</span><span class="nm">MX Mechanical</span><span class="badge">채널 1</span><span class="sw">전환</span></div>
+
+        <div class="foot">
+          <div class="frow">
+            <span>▭</span><span class="t">가장자리 자동 전환</span>
+            <span class="r">대기 <span class="dwell">0.6초</span><span class="pill"></span></span>
+          </div>
+          <div class="frow2"><span class="pill" style="width:40px"></span>드래그 중 전환 안 함<span class="ghost">배치 초기화</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

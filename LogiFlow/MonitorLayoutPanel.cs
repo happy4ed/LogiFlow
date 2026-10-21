@@ -348,7 +348,14 @@ namespace LogiFlow
         {
             base.OnMouseMove(e);
             if (_dragging == null) return;
-            _dragging.Rect = new RectangleF(e.X - _dragOffset.X, e.Y - _dragOffset.Y, _boxW, _boxH);
+            float x = e.X - _dragOffset.X;
+            float y = e.Y - _dragOffset.Y;
+            // 박스가 pane(그리드) 밖으로 못 나가게 clamp — 보이지 않는 곳으로 사라져 못 찾는 것 방지.
+            float maxX = Math.Max(0, ClientSize.Width - _boxW);
+            float maxY = Math.Max(0, ClientSize.Height - _boxH);
+            if (x < 0) x = 0; else if (x > maxX) x = maxX;
+            if (y < 0) y = 0; else if (y > maxY) y = maxY;
+            _dragging.Rect = new RectangleF(x, y, _boxW, _boxH);
             Invalidate();
         }
 
@@ -370,7 +377,9 @@ namespace LogiFlow
             }
             else
             {
+                // 모니터 변에 안 붙었으면 '미배치'로 두고 하단 트레이로 돌려보낸다(그 자리에 두지 않음 → 분실 방지).
                 _dragging.Placed = false;
+                _dragging.Rect = RectangleF.Empty;
             }
             _dragging = null;
             Invalidate();
