@@ -1,0 +1,28 @@
+# Visual Studio user and build output
+.vs/
+**/[Bb]in/
+**/[Oo]bj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local build helper downloaded for CI
+.build-tools/
+
+# Runtime-only data
+**/logs/
+*.log
+*.tmp
+
+# NuGet restore output
+packages/
+*.nupkg
+
+# Generated release packages
+dist/
+
+# OS files
+.DS_Store
+**/.DS_Store
+Thumbs.db

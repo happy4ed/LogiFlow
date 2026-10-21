@@ -1,0 +1,97 @@
+name: Windows build and release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-release.yml'
+      - 'LogiFlow/**'
+      - 'docs/RELEASE_NOTES_v0.1.0.md'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified Windows release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $text = Get-Content LogiFlow/Properties/AssemblyInfo.cs -Raw
+          $version = [regex]::Match($text, 'AssemblyInformationalVersion\("([^"]+)"\)').Groups[1].Value
+          if ($version -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') { throw 'Invalid version' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Prepare net462 targeting pack
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'net462.zip'
+          Invoke-WebRequest 'https://api.nuget.org/v3-flatcontainer/microsoft.netframework.referenceassemblies.net462/1.0.3/microsoft.netframework.referenceassemblies.net462.1.0.3.nupkg' -OutFile $archive
+          Expand-Archive $archive .build-tools/net462
+      - name: Build Windows application (net462)
+        shell: pwsh
+        run: |
+          dotnet msbuild LogiFlow/LogiFlow.csproj /t:Build /p:Configuration=Release /m:1 "/p:TargetFrameworkRootPath=$pwd/.build-tools/net462/build"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
+      - name: Package release ZIP and checksums
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $dist = 'dist'
+          New-Item $dist -ItemType Directory -Force | Out-Null
+          $zip = "$dist/LogiFlow-v$env:VERSION-win.zip"
+          Compress-Archive -Path 'LogiFlow/bin/Release/*' -DestinationPath $zip -Force
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  LogiFlow-v$env:VERSION-win.zip" | Set-Content "$dist/LogiFlow-v$env:VERSION-SHA256SUMS.txt" -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LogiFlow-Windows-${{ steps.version.outputs.version }}
+          path: |
+            dist/LogiFlow-v*-win.zip
+            dist/LogiFlow-v*-SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: build
+    if: (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:')) || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: LogiFlow-Windows-${{ needs.build.outputs.version }}
+          path: release-assets
+      - name: Verify and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          (cd release-assets && sha256sum --check "LogiFlow-v${VERSION}-SHA256SUMS.txt")
+          gh release create "v${VERSION}" release-assets/* \
+            --target "$COMMIT_SHA" --title "LogiFlow ${VERSION}" \
+            --notes-file docs/RELEASE_NOTES_v0.1.0.md --latest
