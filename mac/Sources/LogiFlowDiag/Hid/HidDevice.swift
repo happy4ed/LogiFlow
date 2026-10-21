@@ -134,7 +134,7 @@ final class HidRunLoop {
             // 빈 런루프는 소스가 없으면 즉시 반환하므로, 깨어 있게 타이머 소스를 하나 건다.
             let timer = CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + 1,
                                              1, 0, 0, { _, _ in }, nil)
-            CFRunLoopAddTimer(self.runLoop, timer, mode)
+            CFRunLoopAddTimer(self.runLoop, timer, self.mode)
             CFRunLoopRun()
         }
         thread.name = "LogiFlow.HidRunLoop"
