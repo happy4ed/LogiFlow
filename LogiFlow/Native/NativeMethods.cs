@@ -119,6 +119,11 @@ namespace LogiFlow.Native
         [return: MarshalAs(UnmanagedType.U1)]
         public static extern bool SetupDiGetDeviceInterfaceDetail(IntPtr deviceInfoSet, ref SP_DEVICE_INTERFACE_DATA deviceInterfaceData, ref SP_DEVICE_INTERFACE_DETAIL_DATA deviceInterfaceDetailData, int deviceInterfaceDetailDataSize, ref int requiredSize, IntPtr deviceInfoData);
 
+        // 크기 질의용 오버로드: 상세 버퍼에 NULL(IntPtr.Zero)을 넘길 때 사용.
+        [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.U1)]
+        public static extern bool SetupDiGetDeviceInterfaceDetail(IntPtr deviceInfoSet, ref SP_DEVICE_INTERFACE_DATA deviceInterfaceData, IntPtr deviceInterfaceDetailData, int deviceInterfaceDetailDataSize, ref int requiredSize, IntPtr deviceInfoData);
+
         [DllImport("setupapi.dll", SetLastError = true)]
         public static extern int SetupDiDestroyDeviceInfoList(IntPtr deviceInfoSet);
 
