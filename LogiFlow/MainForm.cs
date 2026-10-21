@@ -607,8 +607,41 @@ namespace LogiFlow
             page.Controls.Add(noteIcon); page.Controls.Add(note);
             y += 40;
 
+            // 로그온 화면 접근 테스트(실험) — 가능성만 확인하는 읽기 전용 프로브(기기 제어 없음).
+            var gp = GroupHead("로그온 화면 접근 테스트 (실험 · 읽기 전용)"); gp.Location = new Point(24, y); page.Controls.Add(gp); y += 24;
+            var pInstall = new ThemedButton { Variant = ButtonVariant.Primary, Text = "테스트 설치·실행", Width = 140, Height = 30, Left = 24, Top = y };
+            var pOpen = new ThemedButton { Text = "로그 열기", Icon = Icons.Folder, Width = 104, Height = 30, Left = 24 + 148, Top = y };
+            var pRemove = new ThemedButton { Variant = ButtonVariant.Ghost, Text = "제거", Width = 70, Height = 30, Left = 24 + 148 + 112, Top = y };
+            pInstall.Click += (s, e) => InstallDesktopProbe();
+            pOpen.Click += (s, e) => DesktopProbe.OpenLog();
+            pRemove.Click += (s, e) =>
+            {
+                bool ok = ProbeTask.RequestUninstall();
+                MessageBox.Show(this, ok ? "테스트를 제거했습니다." : "제거가 취소되었거나 실패했습니다.", "LogiFlow",
+                    MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            };
+            page.Controls.Add(pInstall); page.Controls.Add(pOpen); page.Controls.Add(pRemove);
+            y += 38;
+            var pNote = new Label
+            {
+                Text = "관리자 승인(UAC) 후 SYSTEM 으로 실행됩니다. 바로 Win+L 로 잠금화면에 가서 마우스를 20~30초 움직인 뒤 돌아와 [로그 열기]. "
+                     + "desktop=\"Winlogon\" 줄의 GetCursorPos 가 성공(좌표가 바뀜)이면 로그인 화면 엣지 전환 구현이 가능합니다. 이 테스트는 읽기만 하고 마우스·키보드를 전환하지 않습니다.",
+                AutoSize = false, Width = W, Height = 54, ForeColor = Theme.Muted, Font = UiFont.Get(8.5f), Location = new Point(24, y)
+            };
+            page.Controls.Add(pNote);
+            y += 60;
+
             page.Height = y;
             return page;
+        }
+
+        private void InstallDesktopProbe()
+        {
+            bool ok = ProbeTask.RequestInstallRun();
+            MessageBox.Show(this, ok
+                ? "테스트를 설치하고 지금 SYSTEM 으로 실행했습니다(약 2분).\r\n\r\n① 바로 Win+L 로 잠금화면에 가서 마우스를 20~30초 움직이세요.\r\n② 로그인해 돌아와 [로그 열기]를 누르세요.\r\n③ desktop=\"Winlogon\" 줄의 GetCursorPos 가 성공이면 로그인 화면 전환 구현 가능입니다."
+                : "설치가 취소되었거나 실패했습니다.\r\n관리자 권한(UAC)이 필요하며, 회사 관리 PC 정책이 SYSTEM 작업 생성을 막으면 여기서 실패합니다(그 자체가 '정책상 불가' 판정).",
+                "LogiFlow 로그온 화면 테스트", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
         }
 
         private bool _showAllDiag;

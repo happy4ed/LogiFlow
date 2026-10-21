@@ -64,6 +64,7 @@
     <Compile Include="Hidpp\HidppError.cs" />
     <Compile Include="Hidpp\HidppDevice.cs" />
     <Compile Include="Diagnostics\DiagLogger.cs" />
+    <Compile Include="Diagnostics\DesktopProbe.cs" />
     <Compile Include="Diagnostics\ScanResult.cs" />
     <Compile Include="Diagnostics\DeviceScanner.cs" />
     <Compile Include="Diagnostics\DeviceCache.cs" />

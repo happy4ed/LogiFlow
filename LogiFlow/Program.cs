@@ -32,6 +32,22 @@ namespace LogiFlow
                     Environment.ExitCode = PreLogon.DoUninstall();
                     return;
                 }
+                // 로그온 화면 접근 '가능성 확인' 프로브(읽기 전용 · HID/setHost 없음).
+                if (a0.StartsWith("--desktop-probe", StringComparison.OrdinalIgnoreCase))
+                {
+                    DesktopProbe.RunProbe(ParseEq(a0, 120));
+                    return;
+                }
+                if (a0.StartsWith("--install-probe", StringComparison.OrdinalIgnoreCase))
+                {
+                    Environment.ExitCode = ProbeTask.DoInstallRun();
+                    return;
+                }
+                if (a0.StartsWith("--uninstall-probe", StringComparison.OrdinalIgnoreCase))
+                {
+                    Environment.ExitCode = ProbeTask.DoUninstall();
+                    return;
+                }
             }
 
             bool createdNew;
