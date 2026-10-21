@@ -179,6 +179,13 @@ namespace LogiFlow
                         _deviceSignature = sig;
                         _scanning = false;
                         DeviceCache.Save(results);
+                        // 이 PC 의 호스트(채널)를 기억 — 로그온 전 '당기기' 대상. 기기가 지금 여기 있을 때만 유효.
+                        int myHost = CurrentChannel();
+                        if (myHost >= 0 && Config.MyHost != myHost)
+                        {
+                            Config.MyHost = myHost;
+                            Config.Save();
+                        }
                         ReconfigureWatcher();
                         UpdateTray(null);
                         _settings.OnStateUpdated();

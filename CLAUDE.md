@@ -11,11 +11,19 @@ autographer 마스터 규칙을 상속하되, LogiFlow 는 **자체 origin 을 �
 - 참조 레포: `happy4ed/Logitech-MX-Auto-Switch`(hidapitester 기반). 우리는 외부 exe
   의존 없이 Windows HID API P/Invoke 로 자체 구현.
 
-## 현재 판: 0.7.0 — 글자 크기 3단(pt 가산) · 앱 가로 확대 · 캔버스 잘림 제거
+## 현재 판: 0.8.0 — 로그온 전에도 실행(선택·기본 꺼짐)
+
+- 설정 토글 ON → UAC 상승 후 SYSTEM ONSTART 예약 작업(`LogiFlow-PreLogon`) 설치. 부팅 시 `--prelogon-pull=<myHost>`
+  로 UI 없이 짧게 떠 마우스·키보드를 이 PC 채널로 당김(로그인 화면 전). `LogiFlow/Config/PreLogon.cs`(+`PreLogonRunner`).
+- `Config.MyHost` = 이 PC 호스트 인덱스 — 스캔에서 CurrentHost 로 자동 저장. 설치/삭제는 자기 자신 runas(`--install/uninstall-prelogon`).
+- 한계: 리시버가 이 PC 에 있고 다른 채널일 때만 도달 · 잠금 화면엔 커서 없어 엣지 전환 불가(당기기만) · 관리자/정책 필요.
+- 쓰기는 여전히 HostSwitcher setHost 1곳(로그온 전 경로도 동일 안전 경로).
+- macOS: `.dmg`/`.zip` 설치파일은 `mac-v0.1.0` 에 이미 있음(읽기 전용). 전환·엣지·LaunchAgent 는 Mac 읽기 검증 후.
+
+## 이전 판: 0.7.0 — 글자 크기 3단(pt 가산) · 앱 가로 확대 · 캔버스 잘림 제거
 
 - 글자 크기: 작게 −1 · **보통 +1(기본)** · 크게 +3 pt 가산(`UiFont.SetOffset`·`Config.FontOffset`). 비율 스케일 폐지.
 - 창 1120×650(최소 980×600). 배치 캔버스 여백 = 모니터 1칸↑(가로 1.3·세로 1.6)로 변 박스·라벨 안 잘림. 미배치 채널 박스는 한 줄에 개수만큼 폭 줄여 전부 표시.
-- Mac 설치파일·로그온 전 서비스는 다음 판에서.
 
 ## 이전 판: 0.6.0 — 엣지 전환 glow/tension 효과
 

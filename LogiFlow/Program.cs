@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Windows.Forms;
+using LogiFlow.Config;
 using LogiFlow.Diagnostics;
 
 namespace LogiFlow
@@ -10,8 +11,29 @@ namespace LogiFlow
         private static Mutex _singleInstance;
 
         [STAThread]
-        private static void Main()
+        private static void Main(string[] args)
         {
+            // 로그온 전 서비스 경로(UI 없이 짧게 수행 후 종료) — 트레이 뮤텍스보다 먼저 분기.
+            if (args != null && args.Length > 0)
+            {
+                string a0 = args[0];
+                if (a0.StartsWith("--prelogon-pull", StringComparison.OrdinalIgnoreCase))
+                {
+                    PreLogonRunner.RunPull(ParseEq(a0, -1));
+                    return;
+                }
+                if (a0.StartsWith("--install-prelogon", StringComparison.OrdinalIgnoreCase))
+                {
+                    Environment.ExitCode = PreLogon.DoInstall(ParseEq(a0, -1));
+                    return;
+                }
+                if (a0.StartsWith("--uninstall-prelogon", StringComparison.OrdinalIgnoreCase))
+                {
+                    Environment.ExitCode = PreLogon.DoUninstall();
+                    return;
+                }
+            }
+
             bool createdNew;
             _singleInstance = new Mutex(true, "LogiFlow-A2E1C4D6-8B3F-4A91-9C72-1E5D7F0A2B34", out createdNew);
             if (!createdNew)
@@ -49,6 +71,15 @@ namespace LogiFlow
             {
                 logger.Log("LogiFlow 종료");
             }
+        }
+
+        /// <summary>"--flag=값" 에서 정수 값 파싱. 없으면 def.</summary>
+        private static int ParseEq(string arg, int def)
+        {
+            int eq = arg.IndexOf('=');
+            if (eq < 0) return def;
+            int v;
+            return int.TryParse(arg.Substring(eq + 1), out v) ? v : def;
         }
     }
 }

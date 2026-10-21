@@ -26,7 +26,8 @@ namespace LogiFlow.Config
         public bool AutoStart = true;
         public bool DragGuard = true;            // 드래그 중 전환 안 함(디텍터가 buttonDown 무시).
         public bool DiagLogEnabled = true;       // 진단 로그 남기기.
-        public bool PreLogon = false;            // 로그온 전에도 실행(고급·준비 중). 실제 서비스는 다음 판.
+        public bool PreLogon = false;            // 로그온 전에도 실행(고급·선택). 실제 상태는 PreLogon.IsInstalled().
+        public int MyHost = -1;                   // 이 PC 의 호스트(채널) 인덱스 0-base. 로그온 전 '당기기' 대상.
         public int FontOffset = 1;                // 글자 크기 단계(pt 가산). 작게 -1 · 보통 +1 · 크게 +3.
         public ThemeMode Theme = ThemeMode.System;
         public readonly List<EdgeAttachment> Attachments = new List<EdgeAttachment>();
@@ -86,6 +87,10 @@ namespace LogiFlow.Config
                         case "dragGuard": cfg.DragGuard = val == "1"; break;
                         case "diagLog": cfg.DiagLogEnabled = val == "1"; break;
                         case "preLogon": cfg.PreLogon = val == "1"; break;
+                        case "myHost":
+                            int mh;
+                            if (int.TryParse(val, out mh) && mh >= -1 && mh <= 15) cfg.MyHost = mh;
+                            break;
                         case "fontOffset":
                             int fo;
                             if (int.TryParse(val, out fo) && fo >= -2 && fo <= 6) cfg.FontOffset = fo;
@@ -143,6 +148,7 @@ namespace LogiFlow.Config
                 sb.AppendLine("dragGuard=" + (DragGuard ? "1" : "0"));
                 sb.AppendLine("diagLog=" + (DiagLogEnabled ? "1" : "0"));
                 sb.AppendLine("preLogon=" + (PreLogon ? "1" : "0"));
+                sb.AppendLine("myHost=" + MyHost.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("fontOffset=" + FontOffset.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("theme=" + ((int)Theme).ToString(CultureInfo.InvariantCulture));
                 foreach (var kv in Aliases)

@@ -439,13 +439,8 @@ namespace LogiFlow
             var runCard = Card(24, y, W, 2 * 60);
             AddSettingRow(runCard, 0, "Windows 시작 시 실행", "로그인하면 트레이에 자동으로 상주합니다.", false,
                 Config.AutoStart, (on) => { Config.AutoStart = on; _tray.ApplyConfig(); });
-            AddSettingRow(runCard, 60, "로그온 전에도 실행", "잠금 화면·로그인 전에도 전환이 동작합니다. 서비스 설치가 필요합니다.", true,
-                Config.PreLogon, (on) =>
-                {
-                    Config.PreLogon = on;
-                    _tray.ApplyConfig();
-                    if (on) MessageBox.Show(this, "로그온 전 실행(서비스)은 준비 중입니다. 다음 판에서 제공됩니다.", "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                });
+            AddSettingRow(runCard, 60, "로그온 전에도 실행", "부팅 시(로그인 전) 마우스·키보드를 이 PC 로 당깁니다. 리시버가 이 PC 에 있어야 하고 관리자 권한이 필요합니다. 잠금 화면에선 가장자리 전환은 안 됩니다.", true,
+                PreLogon.IsInstalled(), TogglePreLogon);
             page.Controls.Add(runCard);
             y += 2 * 60 + 16;
 
@@ -460,6 +455,33 @@ namespace LogiFlow
 
             page.Height = y;
             return page;
+        }
+
+        private void TogglePreLogon(bool on)
+        {
+            if (on)
+            {
+                if (Config.MyHost < 0)
+                {
+                    MessageBox.Show(this, "먼저 [진단]에서 새로 고침 해 이 PC 의 채널이 한 번 읽혀야 설치할 수 있습니다.", "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    BeginInvoke((Action)(() => ShowPage(1)));
+                    return;
+                }
+                bool ok = PreLogon.RequestEnable(Config.MyHost);
+                Config.PreLogon = ok;
+                _tray.ApplyConfig();
+                MessageBox.Show(this, ok
+                    ? string.Format("로그온 전 실행을 설치했습니다.\r\n부팅 시 마우스·키보드를 이 PC(채널 {0})로 당깁니다.\r\n\r\n※ 리시버/동글이 이 PC 에 있어야 하며, 잠금 화면에서는 커서가 없어 가장자리 전환은 되지 않습니다.", Config.MyHost + 1)
+                    : "설치가 취소되었거나 실패했습니다.\r\n관리자 권한(UAC)이 필요하며, 회사 정책으로 막혀 있을 수 있습니다.",
+                    "LogiFlow", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            }
+            else
+            {
+                bool ok = PreLogon.RequestDisable();
+                if (ok) Config.PreLogon = false;
+                _tray.ApplyConfig();
+            }
+            BeginInvoke((Action)(() => ShowPage(1)));
         }
 
         private Control MakeRowLabel(string lab, string desc, int top)
