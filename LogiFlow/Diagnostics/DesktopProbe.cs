@@ -140,6 +140,125 @@ namespace LogiFlow.Diagnostics
             Append("desktop-probe 종료. 위에서 desktop=\"Winlogon\" 줄의 GetCursorPos 가 '성공(좌표 변함)'이면 로그인 화면 엣지 전환 구현 가능.");
         }
 
+        // ===== 2차: 세션 0(SYSTEM) → 콘솔 세션 winlogon 데스크톱으로 프로브를 띄우는 런처 =====
+        // 세션 0 서비스에는 입력 데스크톱이 없어 1차(직접 OpenInputDesktop)는 err=1 로 실패한다.
+        // winlogon.exe(콘솔 세션·SYSTEM) 토큰을 복제해 winsta0\winlogon 데스크톱에 --desktop-probe 를 CreateProcessAsUser.
+
+        private const uint PROCESS_QUERY_INFORMATION = 0x0400;
+        private const uint TOKEN_DUPLICATE = 0x0002, TOKEN_QUERY = 0x0008, TOKEN_ASSIGN_PRIMARY = 0x0001;
+        private const uint MAXIMUM_ALLOWED = 0x02000000;
+        private const int SecurityImpersonation = 2;
+        private const int TokenPrimary = 1;
+        private const uint CREATE_NO_WINDOW = 0x08000000;
+        private const uint TH32CS_SNAPPROCESS = 0x00000002;
+
+        [DllImport("kernel32.dll")] private static extern uint WTSGetActiveConsoleSessionId();
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr h);
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern bool ProcessIdToSessionId(uint pid, out uint sessionId);
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern bool Process32First(IntPtr snap, ref PROCESSENTRY32 pe);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern bool Process32Next(IntPtr snap, ref PROCESSENTRY32 pe);
+        [DllImport("advapi32.dll", SetLastError = true)] private static extern bool OpenProcessToken(IntPtr proc, uint access, out IntPtr token);
+        [DllImport("advapi32.dll", SetLastError = true)] private static extern bool DuplicateTokenEx(IntPtr existing, uint access, IntPtr attrs, int impLevel, int tokenType, out IntPtr newToken);
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern bool CreateProcessAsUser(IntPtr token, string app, string cmd, IntPtr pa, IntPtr ta, bool inherit, uint flags, IntPtr env, string curDir, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct PROCESSENTRY32
+        {
+            public uint dwSize; public uint cntUsage; public uint th32ProcessID; public IntPtr th32DefaultHeapID;
+            public uint th32ModuleID; public uint cntThreads; public uint th32ParentProcessID; public int pcPriClassBase;
+            public uint dwFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExeFile;
+        }
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct STARTUPINFO
+        {
+            public int cb; public string lpReserved; public string lpDesktop; public string lpTitle;
+            public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+            public short wShowWindow, cbReserved2; public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public uint dwProcessId, dwThreadId; }
+
+        private static uint FindProcessInSession(string exeName, uint session)
+        {
+            IntPtr snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if (snap == IntPtr.Zero || snap == new IntPtr(-1)) return 0;
+            try
+            {
+                var pe = new PROCESSENTRY32 { dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32)) };
+                if (!Process32First(snap, ref pe)) return 0;
+                do
+                {
+                    if (string.Equals(pe.szExeFile, exeName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        uint sid;
+                        if (ProcessIdToSessionId(pe.th32ProcessID, out sid) && sid == session)
+                            return pe.th32ProcessID;
+                    }
+                } while (Process32Next(snap, ref pe));
+            }
+            finally { CloseHandle(snap); }
+            return 0;
+        }
+
+        /// <summary>세션 0 SYSTEM 에서 호출 — 콘솔 세션 winlogon 데스크톱에 프로브를 띄운다.</summary>
+        public static void RunLauncher()
+        {
+            string who;
+            try { who = System.Security.Principal.WindowsIdentity.GetCurrent().Name; }
+            catch { who = Environment.UserName; }
+            Append("==================================================");
+            Append("desktop-probe-launch(세션0 런처) 시작 · 실행 계정=" + who);
+
+            try
+            {
+                uint consoleSession = WTSGetActiveConsoleSessionId();
+                Append("활성 콘솔 세션 = " + consoleSession + " (0xFFFFFFFF 면 콘솔 미연결)");
+
+                uint pid = FindProcessInSession("winlogon.exe", consoleSession);
+                if (pid == 0) { Append("winlogon.exe(세션 " + consoleSession + ") 을 찾지 못함 — 중단"); return; }
+                Append("winlogon.exe pid=" + pid);
+
+                IntPtr hProc = OpenProcess(PROCESS_QUERY_INFORMATION, false, pid);
+                if (hProc == IntPtr.Zero) { Append("OpenProcess(winlogon) 실패 err=" + Marshal.GetLastWin32Error()); return; }
+
+                IntPtr hTok;
+                if (!OpenProcessToken(hProc, TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, out hTok))
+                { Append("OpenProcessToken 실패 err=" + Marshal.GetLastWin32Error()); CloseHandle(hProc); return; }
+
+                IntPtr hDup;
+                if (!DuplicateTokenEx(hTok, MAXIMUM_ALLOWED, IntPtr.Zero, SecurityImpersonation, TokenPrimary, out hDup))
+                { Append("DuplicateTokenEx 실패 err=" + Marshal.GetLastWin32Error()); CloseHandle(hTok); CloseHandle(hProc); return; }
+
+                var si = new STARTUPINFO();
+                si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+                si.lpDesktop = "winsta0\\winlogon";   // ← 로그인/보안 데스크톱
+                PROCESS_INFORMATION pi;
+                string cmd = "\"" + Application.ExecutablePath + "\" --desktop-probe=100";
+                bool ok = CreateProcessAsUser(hDup, null, cmd, IntPtr.Zero, IntPtr.Zero, false, CREATE_NO_WINDOW, IntPtr.Zero, null, ref si, out pi);
+                if (!ok)
+                {
+                    Append("CreateProcessAsUser(winsta0\\winlogon) 실패 err=" + Marshal.GetLastWin32Error()
+                        + " → 세션 1 winlogon 데스크톱 진입 불가(정책/권한)");
+                }
+                else
+                {
+                    Append("CreateProcessAsUser 성공 — 세션 " + consoleSession + " winlogon 데스크톱에 프로브 띄움 pid=" + pi.dwProcessId
+                        + ". 이제 Win+L 로 잠금화면에서 마우스를 움직여 보세요(약 100초). 아래에 그 프로브 로그가 이어집니다.");
+                    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+                }
+
+                CloseHandle(hDup); CloseHandle(hTok); CloseHandle(hProc);
+            }
+            catch (Exception ex)
+            {
+                Append("런처 오류: " + ex);
+            }
+            Append("desktop-probe-launch 종료.");
+        }
+
         public static void OpenLog()
         {
             try
@@ -209,7 +328,8 @@ namespace LogiFlow.Diagnostics
         public static int DoInstallRun()
         {
             string exe = Application.ExecutablePath;
-            string inner = "\\\"" + exe + "\\\" --desktop-probe=120";
+            // 세션 0 런처를 띄운다(런처가 콘솔 세션 winlogon 데스크톱으로 프로브를 재투입).
+            string inner = "\\\"" + exe + "\\\" --desktop-probe-launch";
             int rc = RunSchtasks("/Create /TN \"" + TaskName + "\" /TR \"" + inner + "\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F");
             if (rc != 0) return rc;
             // 지금 즉시 한 번 실행(잠금화면 테스트용).

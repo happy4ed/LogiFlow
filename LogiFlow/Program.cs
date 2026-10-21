@@ -33,6 +33,12 @@ namespace LogiFlow
                     return;
                 }
                 // 로그온 화면 접근 '가능성 확인' 프로브(읽기 전용 · HID/setHost 없음).
+                // launch(세션0 런처)를 probe 보다 먼저 검사 — StartsWith 로 접두 겹침 방지.
+                if (a0.StartsWith("--desktop-probe-launch", StringComparison.OrdinalIgnoreCase))
+                {
+                    DesktopProbe.RunLauncher();
+                    return;
+                }
                 if (a0.StartsWith("--desktop-probe", StringComparison.OrdinalIgnoreCase))
                 {
                     DesktopProbe.RunProbe(ParseEq(a0, 120));
