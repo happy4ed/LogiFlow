@@ -31,8 +31,11 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 DisableProgramGroupPage=yes
-AppMutex=LogiFlow-A2E1C4D6-8B3F-4A91-9C72-1E5D7F0A2B34
+; 업데이트 시 실행 중인 LogiFlow 를 알아서 종료. Restart Manager(CloseApplications) 로 먼저 시도하고,
+; 트레이 상주라 완전히 안 닫히는 경우를 대비해 [Code] PrepareToInstall 에서 taskkill 로 강제 종료한다.
+; (AppMutex 는 '닫아주세요' 수동 프롬프트를 띄우므로 쓰지 않는다.)
 CloseApplications=yes
+CloseApplicationsFilter=*.exe
 RestartApplications=no
 
 [Languages]
@@ -51,3 +54,30 @@ Name: "{autodesktop}\LogiFlow"; Filename: "{app}\LogiFlow.exe"; WorkingDir: "{ap
 
 [Run]
 Filename: "{app}\LogiFlow.exe"; Description: "{cm:LaunchProgram,LogiFlow}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+procedure KillRunningLogiFlow();
+var
+  ResultCode: Integer;
+begin
+  { 실행 중인 LogiFlow 트레이 앱을 강제 종료(단일 인스턴스 뮤텍스도 함께 해제됨). }
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM LogiFlow.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(500);
+end;
+
+{ 설치(파일 복사) 직전에 호출된다 — 이 시점에 종료해야 파일 잠금 없이 덮어쓴다. }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  KillRunningLogiFlow();
+  Result := '';
+end;
+
+{ 제거 시작 시에도 실행 중이면 종료. }
+function InitializeUninstall(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM LogiFlow.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(500);
+  Result := True;
+end;
