@@ -20,6 +20,7 @@ namespace LogiFlow
         public AppConfig Config { get; private set; }
         public List<ScanResult> LastResults { get; private set; }
         public bool IsScanning { get { return _scanning; } }
+        public ClipboardSync Clip { get { return _clip; } }
 
         private NotifyIcon _tray;
         private ContextMenuStrip _menu;
@@ -53,6 +54,10 @@ namespace LogiFlow
             GC.KeepAlive(forceHandle);
 
             _clip = new ClipboardSync(_settings, log);
+            _clip.OnReceived = (desc) =>
+            {
+                try { if (_tray != null) _tray.ShowBalloonTip(2500, "LogiFlow", "클립보드 받음: " + desc, ToolTipIcon.Info); } catch { }
+            };
             _clip.Apply(Config);
 
             BuildTray();
@@ -228,6 +233,8 @@ namespace LogiFlow
             Config.Save();
             AutoStart.Apply(Config.AutoStart);
             Log.Enabled = Config.DiagLogEnabled;
+            // 로그온 전환이 켜져 있으면 머신 공유 엣지 설정을 최신으로 갱신(워커가 읽음).
+            if (Config.PreLogon) LogonEdges.Write(Config);
             if (_clip != null) _clip.Apply(Config);
             ReconfigureWatcher();
             UpdateTray(null);

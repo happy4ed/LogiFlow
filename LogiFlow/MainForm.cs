@@ -7,6 +7,7 @@ using System.Threading;
 using System.Windows.Forms;
 using LogiFlow.Config;
 using LogiFlow.Diagnostics;
+using LogiFlow.Sharing;
 using LogiFlow.Ui;
 
 namespace LogiFlow
@@ -484,7 +485,7 @@ namespace LogiFlow
             var runCard = Card(24, y, W, 2 * 60);
             AddSettingRow(runCard, 0, "Windows 시작 시 실행", "로그인하면 트레이에 자동으로 상주합니다.", false,
                 Config.AutoStart, (on) => { Config.AutoStart = on; _tray.ApplyConfig(); });
-            AddSettingRow(runCard, 60, "로그온 전에도 실행", "로그인 화면에서도 엣지 전환이 되게 하는 기능(보안 데스크톱 접근)은 방식 확정 후 제공합니다. 켜도 지금은 설치되지 않습니다.", true,
+            AddSettingRow(runCard, 60, "로그온 전에도 실행", "로그인/잠금 화면에서도 가장자리로 밀면 전환됩니다(부팅 시 SYSTEM 작업 · 관리자 권한). [전환 관리]에서 붙인 채널 배치를 씁니다.", true,
                 _preLogonInstalled, TogglePreLogon);
             page.Controls.Add(runCard);
             y += 2 * 60 + 16;
@@ -500,7 +501,7 @@ namespace LogiFlow
 
             // 클립보드 공유
             var g4 = GroupHead("클립보드 공유"); g4.Location = new Point(24, y); page.Controls.Add(g4); y += 22;
-            var clipCard = Card(24, y, W, 3 * 60);
+            var clipCard = Card(24, y, W, 4 * 60);
             AddSettingRow(clipCard, 0, "클립보드 공유 사용", "상대 PC 와 텍스트·이미지 클립보드를 주고받습니다(LAN 직접 연결).", false,
                 Config.ClipEnabled, (on) => { Config.ClipEnabled = on; _tray.ApplyConfig(); });
             AddValueRow(clipCard, 60, "상대 PC 주소", "포트 " + Config.ClipPort + " · 양쪽 방화벽 허용 필요",
@@ -517,8 +518,25 @@ namespace LogiFlow
                     string v = Prompt.Show(this, "암호문구", "양쪽 PC 동일하게 입력 (비우면 끔)", Config.ClipSecret ?? "");
                     if (v != null) { Config.ClipSecret = v; _tray.ApplyConfig(); ShowPage(1); }
                 });
+            // 진단 행: 이 PC 주소 + 연결 테스트 / 테스트 보내기 / 방화벽 허용
+            var diag = new Panel { Left = 0, Top = 180, Width = clipCard.Width, Height = 60, BackColor = Theme.Section };
+            diag.Controls.Add(new Panel { Left = 16, Top = 0, Width = clipCard.Width - 32, Height = 1, BackColor = Theme.Divider });
+            diag.Controls.Add(new Label { Text = "이 PC 주소(상대에 입력): " + ClipboardSync.LocalInfo(Config.ClipPort), AutoSize = false, Width = clipCard.Width - 32, Height = 16, Left = 16, Top = 7, Font = UiFont.Get(8.5f), ForeColor = Theme.Muted });
+            var bTest = new ThemedButton { Text = "연결 테스트", Width = 92, Height = 26, Left = 16, Top = 28 };
+            var bSend = new ThemedButton { Text = "테스트 보내기", Width = 104, Height = 26, Left = 116, Top = 28 };
+            var bFw = new ThemedButton { Text = "방화벽 허용", Width = 96, Height = 26, Left = 228, Top = 28 };
+            bTest.Click += (s, e) => MessageBox.Show(this, ClipboardSync.TestConnect(Config.ClipPeerHost, Config.ClipPort), "연결 테스트", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            bSend.Click += (s, e) => MessageBox.Show(this, _tray.Clip != null ? _tray.Clip.SendTestNow() : "준비 안 됨", "테스트 보내기", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            bFw.Click += (s, e) =>
+            {
+                bool ok = ClipFirewall.RequestAllow(Config.ClipPort);
+                MessageBox.Show(this, ok ? "방화벽 인바운드 허용 규칙을 추가했습니다(포트 " + Config.ClipPort + ")." : "실패/취소 — 관리자 권한이 필요하고 회사 정책이 막을 수 있습니다.",
+                    "방화벽 허용", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            };
+            diag.Controls.Add(bTest); diag.Controls.Add(bSend); diag.Controls.Add(bFw);
+            clipCard.Controls.Add(diag);
             page.Controls.Add(clipCard);
-            y += 3 * 60 + 20;
+            y += 4 * 60 + 20;
 
             page.Height = y;
             return page;
@@ -548,26 +566,37 @@ namespace LogiFlow
         {
             if (on)
             {
-                // 로그인 화면 엣지 전환은 보안 데스크톱(Winlogon) 접근이 필요 — 방식 확정 전까지 설치하지 않는다(정직).
-                MessageBox.Show(this,
-                    "로그인 화면에서의 엣지 전환은 윈도우 보안 화면(Winlogon) 접근이 필요해 방식 확정 후 제공합니다.\r\n지금은 아무것도 설치하지 않습니다.",
-                    "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                if (Config.Attachments.Count == 0)
+                {
+                    MessageBox.Show(this, "먼저 [전환 관리]에서 모니터 변에 채널을 붙여 주세요. 그 배치를 잠금/로그인 화면에서도 씁니다.",
+                        "LogiFlow", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    BeginInvoke((Action)(() => ShowPage(1)));
+                    return;
+                }
+                // 머신 공유 엣지 설정을 먼저 쓴 뒤 SYSTEM 작업 설치(상승).
+                LogonEdges.Write(Config);
+                bool ok = PreLogon.RequestEnable(Config.MyHost);
+                Config.PreLogon = ok;
+                _preLogonInstalled = PreLogon.IsInstalled();
+                _tray.ApplyConfig();
+                MessageBox.Show(this, ok
+                    ? "로그온 전 실행을 설치했습니다.\r\n이제 잠금/로그인 화면에서도 가장자리로 밀면 전환됩니다.\r\n\r\n※ 리시버/동글이 이 PC 에 있어야 하며, 다음 부팅부터 완전히 적용됩니다. 지금 잠금(Win+L)으로도 시험할 수 있습니다."
+                    : "설치가 취소되었거나 실패했습니다.\r\n관리자 권한(UAC)이 필요하며, 회사 관리 PC 정책이 막을 수 있습니다.",
+                    "LogiFlow", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
             else
             {
-                // 끄기: 이전 판(0.8.0)에서 설치된 부팅 작업이 남아 있으면 확실히 제거한다.
                 if (_preLogonInstalled || PreLogon.IsInstalled())
                 {
                     bool ok = PreLogon.RequestDisable();
-                    MessageBox.Show(this,
-                        ok ? "로그온 전 실행(이전 판 설치분)을 제거했습니다."
-                           : "제거가 취소되었거나 실패했습니다. 관리자 권한(UAC)이 필요합니다.",
+                    LogonEdges.Remove();
+                    MessageBox.Show(this, ok ? "로그온 전 실행을 제거했습니다." : "제거가 취소되었거나 실패했습니다(관리자 권한 필요).",
                         "LogiFlow", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
                 }
+                Config.PreLogon = false;
+                _preLogonInstalled = PreLogon.IsInstalled();
+                _tray.ApplyConfig();
             }
-            Config.PreLogon = false;
-            _preLogonInstalled = PreLogon.IsInstalled();
-            _tray.ApplyConfig();
             BeginInvoke((Action)(() => ShowPage(1)));
         }
 

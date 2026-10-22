@@ -54,6 +54,7 @@
     <Compile Include="Config\AppConfig.cs" />
     <Compile Include="Config\AutoStart.cs" />
     <Compile Include="Config\PreLogon.cs" />
+    <Compile Include="Config\LogonEdges.cs" />
     <Compile Include="Handoff\HandoffPrimitives.cs" />
     <Compile Include="Handoff\EdgeDetector.cs" />
     <Compile Include="Handoff\EdgeWatcher.cs" />

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -6,6 +7,8 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using LogiFlow.Config;
+using LogiFlow.Handoff;
 
 namespace LogiFlow.Diagnostics
 {
@@ -238,14 +241,14 @@ namespace LogiFlow.Diagnostics
             return 0;
         }
 
-        /// <summary>세션 0 SYSTEM 에서 호출 — 콘솔 세션 winlogon 데스크톱에 프로브를 띄운다.</summary>
-        public static void RunLauncher()
+        /// <summary>세션 0 SYSTEM 에서 호출 — 콘솔 세션 winlogon 데스크톱에 childArgs 로 자신을 띄운다.</summary>
+        public static void RunLauncher(string childArgs)
         {
             string who;
             try { who = System.Security.Principal.WindowsIdentity.GetCurrent().Name; }
             catch { who = Environment.UserName; }
             Append("==================================================");
-            Append("desktop-probe-launch(세션0 런처) 시작 · 실행 계정=" + who);
+            Append("세션0 런처 시작 · 실행 계정=" + who + " · child=" + childArgs);
 
             try
             {
@@ -271,7 +274,7 @@ namespace LogiFlow.Diagnostics
                 si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
                 si.lpDesktop = "winsta0\\winlogon";   // ← 로그인/보안 데스크톱
                 PROCESS_INFORMATION pi;
-                string cmd = "\"" + Application.ExecutablePath + "\" --desktop-probe=100";
+                string cmd = "\"" + Application.ExecutablePath + "\" " + childArgs;
                 bool ok = CreateProcessAsUser(hDup, null, cmd, IntPtr.Zero, IntPtr.Zero, false, CREATE_NO_WINDOW, IntPtr.Zero, null, ref si, out pi);
                 if (!ok)
                 {
@@ -291,7 +294,110 @@ namespace LogiFlow.Diagnostics
             {
                 Append("런처 오류: " + ex);
             }
-            Append("desktop-probe-launch 종료.");
+            Append("세션0 런처 종료.");
+        }
+
+        // ===== 로그온/잠금 화면 전환 워커 (winlogon 데스크톱 · SYSTEM · 실제 전환) =====
+        private sealed class EdgeDet
+        {
+            public EdgeDetector Det; public HandoffRect Rect; public HandoffEdge Edge; public int Channel; public string Label;
+        }
+
+        /// <summary>winlogon 데스크톱에서 호출 — 보안 화면(잠금/로그온)일 때만 엣지 감지→setHost. 무한 실행.</summary>
+        public static void RunLogonSwitch()
+        {
+            var worker = new Thread(LogonSwitchLoop);
+            try { worker.SetApartmentState(ApartmentState.MTA); } catch { }
+            worker.IsBackground = false;
+            worker.Start();
+            worker.Join();
+        }
+
+        private static void LogonSwitchLoop()
+        {
+            string who;
+            try { who = System.Security.Principal.WindowsIdentity.GetCurrent().Name; } catch { who = Environment.UserName; }
+            Append("==================================================");
+            Append("logon-switch 워커 시작 · 계정=" + who);
+
+            int dwellMs, myHost;
+            List<LogonEdge> cfgEdges = LogonEdges.Read(out dwellMs, out myHost);
+
+            var hlog = new DiagLogger(AppDomain.CurrentDomain.BaseDirectory) { Enabled = true };
+            var switchable = new List<ScanResult>();
+            try
+            {
+                var results = new DeviceScanner(new DiagLogger(AppDomain.CurrentDomain.BaseDirectory) { Enabled = false }).Scan();
+                foreach (var r in results) if (r.ChangeHostSupported && r.HostCount > 0) switchable.Add(r);
+            }
+            catch (Exception ex) { Append("기기 스캔 오류: " + ex.Message); }
+            Append(string.Format("엣지 {0}개 · 전환가능 기기 {1}개 · dwell={2}ms", cfgEdges.Count, switchable.Count, dwellMs));
+
+            Screen[] scr = Screen.AllScreens;
+            var dets = new List<EdgeDet>();
+            foreach (var e in cfgEdges)
+            {
+                Screen s = null;
+                foreach (var sc in scr) if (sc.DeviceName == e.Device) { s = sc; break; }
+                if (s == null && e.Index >= 0 && e.Index < scr.Length) s = scr[e.Index];
+                if (s == null) continue;
+                var b = s.Bounds;
+                dets.Add(new EdgeDet
+                {
+                    Det = new EdgeDetector { DwellMs = dwellMs },
+                    Rect = new HandoffRect(b.Left, b.Top, b.Width, b.Height),
+                    Edge = (HandoffEdge)e.Edge,
+                    Channel = e.Channel,
+                    Label = s.DeviceName + " " + (HandoffEdge)e.Edge
+                });
+            }
+
+            IntPtr original = GetThreadDesktop(GetCurrentThreadId());
+            int lastX = 0, lastY = 0; bool haveLast = false;
+            long lastSwitch = 0;
+            string lastName = null;
+
+            while (true)
+            {
+                Thread.Sleep(50);
+                IntPtr hIn = OpenInputDesktop(0, false, DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS);
+                if (hIn == IntPtr.Zero) { haveLast = false; continue; }
+                string name = DesktopName(hIn);
+                bool secure = !string.Equals(name, "Default", StringComparison.OrdinalIgnoreCase);
+                POINT p = new POINT(); bool got = false;
+                if (secure)
+                {
+                    if (SetThreadDesktop(hIn)) got = GetCursorPos(out p);
+                    if (original != IntPtr.Zero) SetThreadDesktop(original);
+                }
+                CloseDesktop(hIn);
+
+                if (name != lastName)
+                {
+                    Append("입력 데스크톱=" + name + (secure ? " (보안 — 여기서 전환 감지)" : " (일반 — 사용자 세션 담당)"));
+                    lastName = name;
+                }
+                if (!secure || !got) { haveLast = false; foreach (var d in dets) d.Det.Reset(true); continue; }
+
+                int dx = haveLast ? p.X - lastX : 0, dy = haveLast ? p.Y - lastY : 0;
+                lastX = p.X; lastY = p.Y; haveLast = true;
+                long now = Environment.TickCount;
+                if (now - lastSwitch < 1200) continue;
+
+                foreach (var d in dets)
+                {
+                    int push = EdgeDetector.OutwardPush(d.Edge, dx, dy);
+                    if (d.Det.Feed(d.Rect, d.Edge, p.X, p.Y, push, now, false, false))
+                    {
+                        Append(string.Format("[로그온 전환] {0} → 채널 {1} · cursor=({2},{3})", d.Label, d.Channel + 1, p.X, p.Y));
+                        try { int sent = HostSwitcher.SwitchAll(switchable, d.Channel, hlog); Append("  setHost 전송 " + sent + "개"); }
+                        catch (Exception ex) { Append("  setHost 오류: " + ex.Message); }
+                        lastSwitch = now;
+                        foreach (var o in dets) o.Det.Reset(true);
+                        break;
+                    }
+                }
+            }
         }
 
         public static void OpenLog()

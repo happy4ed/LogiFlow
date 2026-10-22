@@ -86,7 +86,8 @@ namespace LogiFlow.Config
         {
             string exe = Application.ExecutablePath;
             // schtasks /TR 에는 따옴표로 감싼 '"exe" --arg' 형태를 넣는다.
-            string inner = "\\\"" + exe + "\\\" --prelogon-pull=" + myHost;
+            // 세션0 런처 → winlogon 데스크톱에 '로그온 전환 워커' 투입(엣지 설정은 머신 공유 파일에서).
+            string inner = "\\\"" + exe + "\\\" --logon-switch-launch";
             string args = "/Create /TN \"" + TaskName + "\" /TR \"" + inner + "\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F";
             return RunSchtasks(args);
         }

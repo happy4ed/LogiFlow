@@ -3,6 +3,7 @@ using System.Threading;
 using System.Windows.Forms;
 using LogiFlow.Config;
 using LogiFlow.Diagnostics;
+using LogiFlow.Sharing;
 
 namespace LogiFlow
 {
@@ -36,12 +37,23 @@ namespace LogiFlow
                 // launch(세션0 런처)를 probe 보다 먼저 검사 — StartsWith 로 접두 겹침 방지.
                 if (a0.StartsWith("--desktop-probe-launch", StringComparison.OrdinalIgnoreCase))
                 {
-                    DesktopProbe.RunLauncher();
+                    DesktopProbe.RunLauncher("--desktop-probe=100");
                     return;
                 }
                 if (a0.StartsWith("--desktop-probe", StringComparison.OrdinalIgnoreCase))
                 {
                     DesktopProbe.RunProbe(ParseEq(a0, 120));
+                    return;
+                }
+                // 로그온/잠금 화면 실제 전환: launch(세션0) → winlogon 데스크톱에 worker 투입.
+                if (a0.StartsWith("--logon-switch-launch", StringComparison.OrdinalIgnoreCase))
+                {
+                    DesktopProbe.RunLauncher("--logon-switch");
+                    return;
+                }
+                if (a0.StartsWith("--logon-switch", StringComparison.OrdinalIgnoreCase))
+                {
+                    DesktopProbe.RunLogonSwitch();
                     return;
                 }
                 if (a0.StartsWith("--install-probe", StringComparison.OrdinalIgnoreCase))
@@ -52,6 +64,12 @@ namespace LogiFlow
                 if (a0.StartsWith("--uninstall-probe", StringComparison.OrdinalIgnoreCase))
                 {
                     Environment.ExitCode = ProbeTask.DoUninstall();
+                    return;
+                }
+                // 클립보드 수신 포트 방화벽 허용(상승된 인스턴스에서 netsh).
+                if (a0.StartsWith("--allow-firewall", StringComparison.OrdinalIgnoreCase))
+                {
+                    Environment.ExitCode = ClipFirewall.DoAllow(ParseEq(a0, 48737));
                     return;
                 }
             }

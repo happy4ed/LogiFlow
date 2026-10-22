@@ -42,6 +42,9 @@ namespace LogiFlow.Sharing
         private string _lastHash = "";
         private readonly object _gate = new object();
 
+        /// <summary>수신 적용 시 UI 스레드에서 호출(설명 문자열) — 트레이 알림 등.</summary>
+        public Action<string> OnReceived;
+
         public ClipboardSync(Control ui, DiagLogger log) { _ui = ui; _log = log; }
 
         public bool Running { get { return _running; } }
@@ -98,6 +101,112 @@ namespace LogiFlow.Sharing
         }
 
         public void Dispose() { Stop(); }
+
+        /// <summary>상대에게 테스트 텍스트를 보낸다(종단 확인). 상대 PC 에서 Ctrl+V 로 확인.</summary>
+        public string SendTestNow()
+        {
+            if (!_running || _aesKey == null) return "먼저 '사용'을 켜고 상대 주소·암호문구를 설정하세요.";
+            try
+            {
+                string msg = "LogiFlow 클립보드 연결 테스트 ✓ " + DateTime.Now.ToString("HH:mm:ss");
+                byte[] tb = Encoding.UTF8.GetBytes(msg);
+                byte[] payload = new byte[tb.Length + 1]; payload[0] = 0; Array.Copy(tb, 0, payload, 1, tb.Length);
+                byte[] frame = Encrypt(payload);
+                using (var cli = new TcpClient())
+                {
+                    var ar = cli.BeginConnect(_peerHost, _port, null, null);
+                    if (!ar.AsyncWaitHandle.WaitOne(3000)) return "실패: 상대 연결 시간초과 — 상대 PC 가 켜져 있고 방화벽 허용됐는지 확인.";
+                    cli.EndConnect(ar);
+                    using (var ns = cli.GetStream())
+                    {
+                        ns.Write(BitConverter.GetBytes(frame.Length), 0, 4);
+                        ns.Write(frame, 0, frame.Length); ns.Flush();
+                    }
+                }
+                return "보냄 OK — 상대 PC 에서 붙여넣기(Ctrl+V) 해서\r\n\"" + msg + "\"\r\n가 나오면 양방향 성공입니다.";
+            }
+            catch (Exception ex) { return "실패: " + ex.Message; }
+        }
+
+        // ---- 진단 보조(설정 화면에서 호출) ----
+        /// <summary>이 PC 의 IPv4 주소들 + 포트(상대 PC 에 입력할 값).</summary>
+        public static string LocalInfo(int port)
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                foreach (var ip in Dns.GetHostAddresses(Dns.GetHostName()))
+                {
+                    if (ip.AddressFamily == AddressFamily.InterNetwork)
+                    {
+                        if (sb.Length > 0) sb.Append(", ");
+                        sb.Append(ip.ToString());
+                    }
+                }
+                return (sb.Length > 0 ? sb.ToString() : "?") + " : " + port;
+            }
+            catch { return "? : " + port; }
+        }
+
+        /// <summary>상대 PC 에 TCP 연결 시도(도달성 확인). 성공/실패 사유 문자열.</summary>
+        public static string TestConnect(string host, int port)
+        {
+            if (string.IsNullOrEmpty(host)) return "상대 주소가 비어 있습니다.";
+            try
+            {
+                using (var cli = new TcpClient())
+                {
+                    var ar = cli.BeginConnect(host.Trim(), port, null, null);
+                    if (!ar.AsyncWaitHandle.WaitOne(3000)) return "실패: 연결 시간초과 — 방화벽/주소/포트 확인.";
+                    cli.EndConnect(ar);
+                    return "연결 OK — 상대 " + host.Trim() + ":" + port + " 에 닿음.";
+                }
+            }
+            catch (Exception ex) { return "실패: " + ex.Message; }
+        }
+    }
+
+    /// <summary>클립보드 수신 포트의 방화벽 인바운드 허용(관리자 권한 netsh). runas 상승 후 실행.</summary>
+    internal static class ClipFirewall
+    {
+        public const string RuleName = "LogiFlow Clipboard";
+
+        public static bool RequestAllow(int port)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo(Application.ExecutablePath, "--allow-firewall=" + port) { UseShellExecute = true, Verb = "runas" };
+                using (var p = Process.Start(psi))
+                {
+                    if (p == null) return false;
+                    p.WaitForExit(15000);
+                    return p.ExitCode == 0;
+                }
+            }
+            catch (System.ComponentModel.Win32Exception) { return false; }
+            catch { return false; }
+        }
+
+        public static int DoAllow(int port)
+        {
+            RunNetsh("advfirewall firewall delete rule name=\"" + RuleName + "\"");
+            return RunNetsh("advfirewall firewall add rule name=\"" + RuleName + "\" dir=in action=allow protocol=TCP localport=" + port + " profile=any");
+        }
+
+        private static int RunNetsh(string args)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("netsh.exe", args) { UseShellExecute = false, CreateNoWindow = true };
+                using (var p = Process.Start(psi))
+                {
+                    if (p == null) return 1;
+                    p.WaitForExit(10000);
+                    return p.ExitCode;
+                }
+            }
+            catch { return 1; }
+        }
 
         // ---- 송신 (UI 스레드에서 호출됨) ----
         private void OnClipboardUpdate()
@@ -197,21 +306,25 @@ namespace LogiFlow.Sharing
                     try
                     {
                         lock (_gate) { _lastHash = hash; }  // 우리가 세팅 → 뒤따르는 clipboard-update 무시(에코 방지)
+                        string desc;
                         if (payload[0] == 0)
                         {
                             string t = Encoding.UTF8.GetString(payload, 1, payload.Length - 1);
                             if (t.Length == 0) Clipboard.Clear(); else Clipboard.SetText(t);
-                            _log.Log("클립보드 수신 적용(텍스트 " + t.Length + "자)");
+                            desc = "텍스트 " + t.Length + "자";
+                            _log.Log("클립보드 수신 적용(" + desc + ")");
                         }
-                        else if (payload[0] == 1)
+                        else
                         {
                             using (var ms = new MemoryStream(payload, 1, payload.Length - 1))
                             using (Image img = Image.FromStream(ms))
                             {
                                 Clipboard.SetImage(img);
                             }
+                            desc = "이미지";
                             _log.Log("클립보드 수신 적용(이미지)");
                         }
+                        try { if (OnReceived != null) OnReceived(desc); } catch { }
                     }
                     catch (Exception ex) { _log.LogError("클립보드 적용 실패: " + ex.Message); }
                 }));
