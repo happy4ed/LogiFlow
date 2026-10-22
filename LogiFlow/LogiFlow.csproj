@@ -69,6 +69,7 @@
     <Compile Include="Diagnostics\DeviceScanner.cs" />
     <Compile Include="Diagnostics\DeviceCache.cs" />
     <Compile Include="Diagnostics\HostSwitcher.cs" />
+    <Compile Include="Clipboard\ClipboardSync.cs" />
     <Compile Include="Ui\Theme.cs" />
     <Compile Include="Ui\UiFont.cs" />
     <Compile Include="Ui\Icons.cs" />

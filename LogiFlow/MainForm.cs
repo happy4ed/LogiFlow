@@ -496,10 +496,52 @@ namespace LogiFlow
             AddSettingRow(swCard, 60, "진단 로그 남기기", "엣지 판정·전환 트리거를 로그 폴더에 기록합니다.", false,
                 Config.DiagLogEnabled, (on) => { Config.DiagLogEnabled = on; Log.Enabled = on; _tray.ApplyConfig(); });
             page.Controls.Add(swCard);
-            y += 2 * 60 + 20;
+            y += 2 * 60 + 16;
+
+            // 클립보드 공유
+            var g4 = GroupHead("클립보드 공유"); g4.Location = new Point(24, y); page.Controls.Add(g4); y += 22;
+            var clipCard = Card(24, y, W, 3 * 60);
+            AddSettingRow(clipCard, 0, "클립보드 공유 사용", "상대 PC 와 텍스트·이미지 클립보드를 주고받습니다(LAN 직접 연결).", false,
+                Config.ClipEnabled, (on) => { Config.ClipEnabled = on; _tray.ApplyConfig(); });
+            AddValueRow(clipCard, 60, "상대 PC 주소", "포트 " + Config.ClipPort + " · 양쪽 방화벽 허용 필요",
+                string.IsNullOrEmpty(Config.ClipPeerHost) ? "미설정" : Config.ClipPeerHost,
+                () =>
+                {
+                    string v = Prompt.Show(this, "상대 PC 주소", "상대 PC 의 IP 또는 호스트명", Config.ClipPeerHost ?? "");
+                    if (v != null) { Config.ClipPeerHost = v.Trim(); _tray.ApplyConfig(); ShowPage(1); }
+                });
+            AddValueRow(clipCard, 120, "암호문구", "양쪽 PC 에 같은 값 — 틀리면 전달 안 됨",
+                string.IsNullOrEmpty(Config.ClipSecret) ? "미설정" : "설정됨",
+                () =>
+                {
+                    string v = Prompt.Show(this, "암호문구", "양쪽 PC 동일하게 입력 (비우면 끔)", Config.ClipSecret ?? "");
+                    if (v != null) { Config.ClipSecret = v; _tray.ApplyConfig(); ShowPage(1); }
+                });
+            page.Controls.Add(clipCard);
+            y += 3 * 60 + 20;
 
             page.Height = y;
             return page;
+        }
+
+        private void AddValueRow(Panel card, int top, string lab, string desc, string valueText, Action onEdit)
+        {
+            var row = new Panel { Left = 0, Top = top, Width = card.Width, Height = 60, BackColor = Theme.Section };
+            var l1 = new Label { Text = lab, AutoSize = true, Font = UiFont.Get(9.5f, FontStyle.Bold), ForeColor = Theme.Ink, Left = 16, Top = 12 };
+            var l2 = new Label { Text = desc, AutoSize = false, Font = UiFont.Get(8.5f), ForeColor = Theme.Muted, Left = 16, Top = 32, Width = card.Width - 180, Height = 18 };
+            var edit = new ThemedButton { Text = "편집", Width = 64, Height = 26, Top = 17, Left = card.Width - 80 };
+            edit.Click += (s, e) => onEdit();
+            Font vf = UiFont.Get(9f, FontStyle.Bold);
+            var val = new Label { Text = valueText, AutoSize = true, Font = vf, ForeColor = Theme.Accent, Top = 15 };
+            int vw2 = TextRenderer.MeasureText(valueText, vf).Width;
+            val.Left = Math.Max(120, edit.Left - 12 - vw2);
+            row.Controls.Add(l1); row.Controls.Add(l2); row.Controls.Add(val); row.Controls.Add(edit);
+            if (top > 0)
+            {
+                var sep = new Panel { Left = 16, Top = 0, Width = card.Width - 32, Height = 1, BackColor = Theme.Divider };
+                row.Controls.Add(sep);
+            }
+            card.Controls.Add(row);
         }
 
         private void TogglePreLogon(bool on)

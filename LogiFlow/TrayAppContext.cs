@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Windows.Forms;
+using LogiFlow.Clipboard;
 using LogiFlow.Config;
 using LogiFlow.Diagnostics;
 using LogiFlow.Handoff;
@@ -25,6 +26,7 @@ namespace LogiFlow
         private EdgeWatcher _watcher;
         private GlowController _glow;
         private MainForm _settings;
+        private ClipboardSync _clip;
         private bool _scanning;
         private bool _exiting;
         private string _deviceSignature = "";
@@ -49,6 +51,9 @@ namespace LogiFlow
             _settings = new MainForm(this);
             var forceHandle = _settings.Handle;
             GC.KeepAlive(forceHandle);
+
+            _clip = new ClipboardSync(_settings, log);
+            _clip.Apply(Config);
 
             BuildTray();
             AutoStart.Apply(Config.AutoStart);
@@ -223,6 +228,7 @@ namespace LogiFlow
             Config.Save();
             AutoStart.Apply(Config.AutoStart);
             Log.Enabled = Config.DiagLogEnabled;
+            if (_clip != null) _clip.Apply(Config);
             ReconfigureWatcher();
             UpdateTray(null);
         }
@@ -272,6 +278,7 @@ namespace LogiFlow
             _exiting = true;
             try { _watcher.Dispose(); } catch { }
             try { _glow.Dispose(); } catch { }
+            try { if (_clip != null) _clip.Dispose(); } catch { }
             try { _tray.Visible = false; _tray.Dispose(); } catch { }
             Log.Log("LogiFlow 종료(트레이)");
             ExitThread();

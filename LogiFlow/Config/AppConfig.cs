@@ -29,6 +29,11 @@ namespace LogiFlow.Config
         public bool PreLogon = false;            // 로그온 전에도 실행(고급·선택). 실제 상태는 PreLogon.IsInstalled().
         public int MyHost = -1;                   // 이 PC 의 호스트(채널) 인덱스 0-base. 로그온 전 '당기기' 대상.
         public int FontOffset = 1;                // 글자 크기 단계(pt 가산). 작게 -1 · 보통 +1 · 크게 +3.
+        // 클립보드 공유(LAN 직접 연결 · 다른 서브넷도 상대 IP 지정).
+        public bool ClipEnabled = false;
+        public string ClipPeerHost = "";          // 상대 PC IP/호스트명
+        public int ClipPort = 48737;              // 양쪽 같은 포트
+        public string ClipSecret = "";            // 암호문구(AES+HMAC 키 유도). 양쪽 동일해야.
         public ThemeMode Theme = ThemeMode.System;
         public readonly List<EdgeAttachment> Attachments = new List<EdgeAttachment>();
         public readonly Dictionary<int, string> Aliases = new Dictionary<int, string>(); // 채널(0-base)→별칭
@@ -95,6 +100,13 @@ namespace LogiFlow.Config
                             int fo;
                             if (int.TryParse(val, out fo) && fo >= -2 && fo <= 6) cfg.FontOffset = fo;
                             break;
+                        case "clipEnabled": cfg.ClipEnabled = val == "1"; break;
+                        case "clipHost": cfg.ClipPeerHost = val; break;
+                        case "clipPort":
+                            int cp;
+                            if (int.TryParse(val, out cp) && cp >= 1 && cp <= 65535) cfg.ClipPort = cp;
+                            break;
+                        case "clipSecret": cfg.ClipSecret = val; break;
                         case "theme":
                             int tm;
                             if (int.TryParse(val, out tm) && tm >= 0 && tm <= 2) cfg.Theme = (ThemeMode)tm;
@@ -150,6 +162,10 @@ namespace LogiFlow.Config
                 sb.AppendLine("preLogon=" + (PreLogon ? "1" : "0"));
                 sb.AppendLine("myHost=" + MyHost.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("fontOffset=" + FontOffset.ToString(CultureInfo.InvariantCulture));
+                sb.AppendLine("clipEnabled=" + (ClipEnabled ? "1" : "0"));
+                sb.AppendLine("clipHost=" + (ClipPeerHost ?? ""));
+                sb.AppendLine("clipPort=" + ClipPort.ToString(CultureInfo.InvariantCulture));
+                sb.AppendLine("clipSecret=" + (ClipSecret ?? ""));
                 sb.AppendLine("theme=" + ((int)Theme).ToString(CultureInfo.InvariantCulture));
                 foreach (var kv in Aliases)
                 {
