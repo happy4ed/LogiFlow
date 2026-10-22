@@ -52,6 +52,10 @@ Source: "{#PackageDir}\*"; DestDir: "{app}"; Excludes: "logs\*,*.pdb"; Flags: ig
 Name: "{group}\LogiFlow"; Filename: "{app}\LogiFlow.exe"; WorkingDir: "{app}"
 Name: "{autodesktop}\LogiFlow"; Filename: "{app}\LogiFlow.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
+[Registry]
+; 로그인 시 트레이 자동 시작(앱 내 설정 토글과 동일 키). 재부팅 후에도 반드시 뜨게 설치 시 등록.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "LogiFlow"; ValueData: """{app}\LogiFlow.exe"""; Flags: uninsdeletevalue
+
 [Run]
 Filename: "{app}\LogiFlow.exe"; Description: "{cm:LaunchProgram,LogiFlow}"; Flags: nowait postinstall skipifsilent
 

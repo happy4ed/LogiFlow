@@ -353,7 +353,9 @@ namespace LogiFlow.Diagnostics
                 var b = s.Bounds;
                 var det = new EdgeDet
                 {
-                    Det = new EdgeDetector { DwellMs = dwellMs },
+                    // 워커는 GetCursorPos 폴링이라 화면 끝에 박힌 커서의 '바깥 밀기'를 못 읽는다 →
+                    // MinPushPx=0 으로 '변에서 dwell 채우면 전환'. (사용자 세션은 raw 입력이라 밀기 요건 유지)
+                    Det = new EdgeDetector { DwellMs = dwellMs, MinPushPx = 0 },
                     Rect = new HandoffRect(b.Left, b.Top, b.Width, b.Height),
                     Edge = (HandoffEdge)e.Edge,
                     Channel = e.Channel,

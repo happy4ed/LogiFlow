@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Windows.Forms;
 using LogiFlow.Diagnostics;
 
@@ -89,15 +90,41 @@ namespace LogiFlow.Config
 
         public static int DoInstall(int myHost)
         {
-            string exe = Application.ExecutablePath;
-            // schtasks /TR 에는 따옴표로 감싼 '"exe" --arg' 형태를 넣는다.
-            // 세션0 런처 → winlogon 데스크톱에 '로그온 전환 워커' 투입(엣지 설정은 머신 공유 파일에서).
+            // 중요: 로그인 전(로그온 화면)엔 사용자 %LocalAppData% 가 안 올라와 SYSTEM 이 그 경로 exe 를
+            // 못 찾는다 → exe·의존 파일을 머신 공용 ProgramData 로 복사해 거기서 실행한다.
+            string exe = CopyWorkerToMachine();
             string inner = "\\\"" + exe + "\\\" --logon-switch-launch";
             string args = "/Create /TN \"" + TaskName + "\" /TR \"" + inner + "\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F";
             int rc = RunSchtasks(args);
-            // 재부팅 없이 지금 바로 실행(시험용). 기존 워커가 돌고 있으면 schtasks 가 중복 실행 안 함.
+            // 재부팅 없이 지금 바로 실행(시험용).
             if (rc == 0) RunSchtasks("/Run /TN \"" + TaskName + "\"");
             return rc;
+        }
+
+        /// <summary>워커 exe·의존 파일을 머신 공용(ProgramData)으로 복사하고 그 exe 경로를 돌려준다.
+        /// 실패하면 원본(사용자 경로) 그대로 사용.</summary>
+        private static string CopyWorkerToMachine()
+        {
+            string src = Application.ExecutablePath;
+            try
+            {
+                string srcDir = Path.GetDirectoryName(src);
+                string dstDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "LogiFlow", "worker");
+                Directory.CreateDirectory(dstDir);
+                foreach (string f in Directory.GetFiles(srcDir))
+                {
+                    string ext = Path.GetExtension(f).ToLowerInvariant();
+                    if (ext == ".exe" || ext == ".dll" || ext == ".config")
+                    {
+                        try { File.Copy(f, Path.Combine(dstDir, Path.GetFileName(f)), true); } catch { }
+                    }
+                }
+                string dstExe = Path.Combine(dstDir, Path.GetFileName(src));
+                if (File.Exists(dstExe)) return dstExe;
+            }
+            catch { }
+            return src;
         }
 
         public static int DoUninstall()
