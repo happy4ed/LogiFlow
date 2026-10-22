@@ -26,15 +26,20 @@ namespace LogiFlow.Config
         {
             try
             {
-                // 출력은 리디렉션하지 않는다(파이프 버퍼 데드락 방지) — CreateNoWindow 로 콘솔만 숨기고 종료코드만 본다.
+                // 출력 리디렉션 필수 — 콘솔 없는 앱에서 리디렉션 안 하면 schtasks 가 출력 핸들이 없어
+                // 비정상 종료코드를 낼 수 있다(x86 토글 꺼짐 원인). 출력은 작아서 데드락 없음.
                 var psi = new ProcessStartInfo("schtasks.exe", "/Query /TN \"" + TaskName + "\"")
                 {
                     UseShellExecute = false,
                     CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
                 };
                 using (var p = Process.Start(psi))
                 {
                     if (p == null) return false;
+                    p.StandardOutput.ReadToEnd();
+                    p.StandardError.ReadToEnd();
                     if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return false; }
                     return p.ExitCode == 0;
                 }

@@ -434,10 +434,12 @@ namespace LogiFlow.Diagnostics
             try
             {
                 var psi = new ProcessStartInfo("schtasks.exe", "/Query /TN \"" + TaskName + "\"")
-                { UseShellExecute = false, CreateNoWindow = true };
+                { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
                 using (var p = Process.Start(psi))
                 {
                     if (p == null) return false;
+                    p.StandardOutput.ReadToEnd();
+                    p.StandardError.ReadToEnd();
                     if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return false; }
                     return p.ExitCode == 0;
                 }
