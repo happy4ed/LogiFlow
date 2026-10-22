@@ -306,11 +306,25 @@ namespace LogiFlow.Diagnostics
         /// <summary>winlogon 데스크톱에서 호출 — 보안 화면(잠금/로그온)일 때만 엣지 감지→setHost. 무한 실행.</summary>
         public static void RunLogonSwitch()
         {
-            var worker = new Thread(LogonSwitchLoop);
-            try { worker.SetApartmentState(ApartmentState.MTA); } catch { }
-            worker.IsBackground = false;
-            worker.Start();
-            worker.Join();
+            // 단일 인스턴스 — 중복 워커가 HID 를 서로 물면 setHost 가 0개로 실패한다(실측). 하나만 돈다.
+            bool createdNew = false;
+            Mutex mutex = null;
+            try { mutex = new Mutex(true, "Global\\LogiFlow-LogonSwitch-Worker-7A2", out createdNew); }
+            catch { createdNew = true; }
+            if (!createdNew)
+            {
+                Append("logon-switch 워커가 이미 실행 중 — 중복 인스턴스 종료(HID 충돌 방지).");
+                return;
+            }
+            try
+            {
+                var worker = new Thread(LogonSwitchLoop);
+                try { worker.SetApartmentState(ApartmentState.MTA); } catch { }
+                worker.IsBackground = false;
+                worker.Start();
+                worker.Join();
+            }
+            finally { try { if (mutex != null) mutex.ReleaseMutex(); } catch { } GC.KeepAlive(mutex); }
         }
 
         private static void LogonSwitchLoop()
@@ -433,6 +447,17 @@ namespace LogiFlow.Diagnostics
                     if (d.Det.Feed(d.Rect, d.Edge, p.X, p.Y, push, now, false, false))
                     {
                         Append(string.Format("[로그온 전환] {0} → 채널 {1} · cursor=({2},{3})", d.Label, d.Channel + 1, p.X, p.Y));
+                        // 시작 스캔이 HID 경합으로 비었을 수 있다 → 전송 직전 비어 있으면 1회 즉석 재스캔.
+                        if (switchable.Count == 0)
+                        {
+                            try
+                            {
+                                var rr = new DeviceScanner(new DiagLogger(AppDomain.CurrentDomain.BaseDirectory) { Enabled = false }).Scan();
+                                foreach (var r in rr) if (r.ChangeHostSupported && r.HostCount > 0) switchable.Add(r);
+                                Append("  (재스캔) 전환가능 기기 " + switchable.Count + "개");
+                            }
+                            catch (Exception ex) { Append("  재스캔 오류: " + ex.Message); }
+                        }
                         try { int sent = HostSwitcher.SwitchAll(switchable, d.Channel, hlog); Append("  setHost 전송 " + sent + "개"); }
                         catch (Exception ex) { Append("  setHost 오류: " + ex.Message); }
                         lastSwitch = now;
