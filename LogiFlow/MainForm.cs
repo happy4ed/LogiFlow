@@ -577,7 +577,7 @@ namespace LogiFlow
                 LogonEdges.Write(Config);
                 bool ok = PreLogon.RequestEnable(Config.MyHost);
                 Config.PreLogon = ok;
-                _preLogonInstalled = PreLogon.IsInstalled();
+                _preLogonInstalled = ok;   // 설치 성공값 신뢰 — 직후 schtasks 재조회(불안정)로 토글이 꺼지는 버그 방지
                 _tray.ApplyConfig();
                 MessageBox.Show(this, ok
                     ? "로그온 전 실행을 설치했습니다.\r\n이제 잠금/로그인 화면에서도 가장자리로 밀면 전환됩니다.\r\n\r\n※ 리시버/동글이 이 PC 에 있어야 하며, 다음 부팅부터 완전히 적용됩니다. 지금 잠금(Win+L)으로도 시험할 수 있습니다."
@@ -594,7 +594,7 @@ namespace LogiFlow
                         "LogiFlow", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
                 }
                 Config.PreLogon = false;
-                _preLogonInstalled = PreLogon.IsInstalled();
+                _preLogonInstalled = false;
                 _tray.ApplyConfig();
             }
             BeginInvoke((Action)(() => ShowPage(1)));
