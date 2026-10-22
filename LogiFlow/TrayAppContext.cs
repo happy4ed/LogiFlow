@@ -58,6 +58,10 @@ namespace LogiFlow
             {
                 try { if (_tray != null) _tray.ShowBalloonTip(2500, "LogiFlow", "클립보드 받음: " + desc, ToolTipIcon.Info); } catch { }
             };
+            _clip.OnAuthFail = () =>
+            {
+                try { if (_tray != null) _tray.ShowBalloonTip(3500, "LogiFlow 클립보드", "데이터는 받았지만 열지 못했습니다 — 양쪽 암호문구가 다릅니다.", ToolTipIcon.Warning); } catch { }
+            };
             _clip.Apply(Config);
 
             BuildTray();

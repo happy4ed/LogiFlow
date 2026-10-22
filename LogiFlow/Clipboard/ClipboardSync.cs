@@ -45,6 +45,8 @@ namespace LogiFlow.Sharing
 
         /// <summary>수신 적용 시 UI 스레드에서 호출(설명 문자열) — 트레이 알림 등.</summary>
         public Action<string> OnReceived;
+        /// <summary>프레임은 받았으나 복호·인증 실패(암호문구 불일치 추정) 시 호출.</summary>
+        public Action OnAuthFail;
 
         public ClipboardSync(Control ui, DiagLogger log) { _ui = ui; _log = log; }
 
@@ -201,6 +203,7 @@ namespace LogiFlow.Sharing
             string hash = Hash(payload);
             lock (_gate) { if (hash == _lastHash) return; _lastHash = hash; }
 
+            _log.Log("클립보드 변화 감지 → 전송 시도(" + (payload[0] == 0 ? "텍스트" : "이미지") + " " + payload.Length + "바이트, 상대 " + _peerHost + ":" + _port + ")");
             byte[] frame;
             try { frame = Encrypt(payload); } catch (Exception ex) { _log.LogError("암호화 실패: " + ex.Message); return; }
             var t = new Thread(() => SendFrame(frame)) { IsBackground = true, Name = "LogiFlow.Clip.Send" };
@@ -223,8 +226,19 @@ namespace LogiFlow.Sharing
                         ns.Flush();
                     }
                 }
+                _log.Log("클립보드 전송 성공 → " + _peerHost);
             }
             catch (Exception ex) { _log.LogError("클립보드 전송 실패(" + _peerHost + "): " + ex.Message); }
+        }
+
+        private void SignalAuthFail()
+        {
+            try
+            {
+                if (_ui.IsDisposed || !_ui.IsHandleCreated) return;
+                _ui.BeginInvoke((Action)(() => { try { if (OnAuthFail != null) OnAuthFail(); } catch { } }));
+            }
+            catch { }
         }
 
         // ---- 수신 (백그라운드) ----
@@ -245,8 +259,10 @@ namespace LogiFlow.Sharing
                         int len = BitConverter.ToInt32(lenb, 0);
                         if (len <= 0 || len > MaxBytes + 4096) continue;
                         byte[] frame = ReadExact(ns, len); if (frame == null) continue;
+                        _log.Log("클립보드 프레임 수신 " + len + "바이트");
                         byte[] payload = Decrypt(frame);
                         if (payload != null && payload.Length >= 1) ApplyPayload(payload);
+                        else SignalAuthFail();
                     }
                 }
                 catch (Exception ex) { _log.LogError("클립보드 수신 처리 실패: " + ex.Message); }
