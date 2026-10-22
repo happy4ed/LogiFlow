@@ -511,14 +511,14 @@ namespace LogiFlow
                 () =>
                 {
                     string v = Prompt.Show(this, "상대 PC 주소", "상대 PC 의 IP 또는 호스트명", Config.ClipPeerHost ?? "");
-                    if (v != null) { Config.ClipPeerHost = v.Trim(); _tray.ApplyConfig(); ShowPage(1); }
+                    if (v != null) { Config.ClipPeerHost = ClipboardSync.Norm(v); _tray.ApplyConfig(); ShowPage(1); }
                 });
             AddValueRow(clipCard, 120, "암호문구", "양쪽 PC 에 같은 값 — 틀리면 전달 안 됨",
                 string.IsNullOrEmpty(Config.ClipSecret) ? "미설정" : "설정됨",
                 () =>
                 {
                     string v = Prompt.Show(this, "암호문구", "양쪽 PC 동일하게 입력 (비우면 끔)", Config.ClipSecret ?? "");
-                    if (v != null) { Config.ClipSecret = v; _tray.ApplyConfig(); ShowPage(1); }
+                    if (v != null) { Config.ClipSecret = ClipboardSync.Norm(v); _tray.ApplyConfig(); ShowPage(1); }
                 });
             // 진단 행: 이 PC 주소 + 연결 테스트 / 테스트 보내기 / 방화벽 허용
             var diag = new Panel { Left = 0, Top = 180, Width = clipCard.Width, Height = 60, BackColor = Theme.Section };

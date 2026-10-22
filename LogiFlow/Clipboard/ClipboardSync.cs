@@ -59,15 +59,23 @@ namespace LogiFlow.Sharing
             if (cfg == null || !cfg.ClipEnabled) return;
             if (string.IsNullOrEmpty(cfg.ClipSecret)) { _log.Log("클립보드 공유: 암호문구 없음 — 비활성"); return; }
             if (string.IsNullOrEmpty(cfg.ClipPeerHost)) { _log.Log("클립보드 공유: 상대 주소 없음 — 비활성"); return; }
-            _peerHost = cfg.ClipPeerHost.Trim();
+            _peerHost = Norm(cfg.ClipPeerHost);
             _port = cfg.ClipPort;
             DeriveKeys(cfg.ClipSecret);
             Start();
         }
 
+        /// <summary>전각(한글 IME) 문자를 반각으로 정규화 — IP·암호문구가 양쪽에서 일치하도록.</summary>
+        internal static string Norm(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            try { return s.Trim().Normalize(System.Text.NormalizationForm.FormKC); }
+            catch { return s.Trim(); }
+        }
+
         private void DeriveKeys(string pass)
         {
-            using (var kdf = new Rfc2898DeriveBytes(pass, Salt, 20000))
+            using (var kdf = new Rfc2898DeriveBytes(Norm(pass), Salt, 20000))
             {
                 _aesKey = kdf.GetBytes(32);
                 _macKey = kdf.GetBytes(32);
@@ -154,15 +162,16 @@ namespace LogiFlow.Sharing
         /// <summary>상대 PC 에 TCP 연결 시도(도달성 확인). 성공/실패 사유 문자열.</summary>
         public static string TestConnect(string host, int port)
         {
+            host = Norm(host);
             if (string.IsNullOrEmpty(host)) return "상대 주소가 비어 있습니다.";
             try
             {
                 using (var cli = new TcpClient())
                 {
-                    var ar = cli.BeginConnect(host.Trim(), port, null, null);
+                    var ar = cli.BeginConnect(host, port, null, null);
                     if (!ar.AsyncWaitHandle.WaitOne(3000)) return "실패: 연결 시간초과 — 방화벽/주소/포트 확인.";
                     cli.EndConnect(ar);
-                    return "연결 OK — 상대 " + host.Trim() + ":" + port + " 에 닿음.";
+                    return "연결 OK — 상대 " + host + ":" + port + " 에 닿음.";
                 }
             }
             catch (Exception ex) { return "실패: " + ex.Message; }
