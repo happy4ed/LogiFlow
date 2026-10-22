@@ -41,6 +41,7 @@ namespace LogiFlow.Sharing
         private int _port;
         private byte[] _aesKey, _macKey;
         private string _lastHash = "";
+        private long _appliedAt;   // 수신 적용 시각 — 직후 생기는 내 클립보드 변화(특히 이미지 재인코딩)를 무시해 핑퐁 차단.
         private readonly object _gate = new object();
 
         /// <summary>수신 적용 시 UI 스레드에서 호출(설명 문자열) — 트레이 알림 등.</summary>
@@ -180,6 +181,8 @@ namespace LogiFlow.Sharing
         // ---- 송신 (UI 스레드에서 호출됨) ----
         private void OnClipboardUpdate()
         {
+            // 방금 수신 적용으로 생긴 내 클립보드 변화는 되돌려 보내지 않는다(이미지 재인코딩으로 해시가 달라져도 핑퐁 차단).
+            if (Environment.TickCount - _appliedAt < 1200) return;
             byte[] payload = null;
             try
             {
@@ -288,6 +291,7 @@ namespace LogiFlow.Sharing
                 {
                     try
                     {
+                        _appliedAt = Environment.TickCount;   // 적용 직후 생길 clipboard-update 를 억제(핑퐁 차단)
                         lock (_gate) { _lastHash = hash; }  // 우리가 세팅 → 뒤따르는 clipboard-update 무시(에코 방지)
                         string desc;
                         if (payload[0] == 0)
