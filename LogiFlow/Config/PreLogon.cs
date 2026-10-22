@@ -97,26 +97,44 @@ namespace LogiFlow.Config
             // 트리거 2중(부팅 + 로그온). 부팅 ONSTART 는 환경(빠른 시작 등)에 따라 안 뜰 수 있어,
             // '로그인하면 무조건 뜨는' 로그온 트리거를 함께 건다(단일 인스턴스 뮤텍스가 중복 차단).
             // plain schtasks /SC 는 트리거 1개만 되므로 XML 로 생성한다.
-            int rc;
+            int rc = 1;
             try
             {
                 string xml = BuildTaskXml(exe);
                 string xmlPath = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "LogiFlow", "task.xml");
                 Directory.CreateDirectory(Path.GetDirectoryName(xmlPath));
-                // schtasks /XML 은 UTF-16 LE(BOM) 를 요구한다.
+                // schtasks /XML 은 UTF-16 LE(BOM) 를 요구한다. /RL 은 XML Principal 과 충돌할 수 있어 뺀다.
                 File.WriteAllText(xmlPath, xml, new System.Text.UnicodeEncoding(false, true));
-                rc = RunSchtasks("/Create /TN \"" + TaskName + "\" /XML \"" + xmlPath + "\" /RU SYSTEM /RL HIGHEST /F");
+                rc = RunSchtasks("/Create /TN \"" + TaskName + "\" /XML \"" + xmlPath + "\" /RU SYSTEM /F");
+                LogLine("작업 생성(XML · 부팅+로그온 · 배터리 조건 제거) rc=" + rc);
             }
-            catch
+            catch (Exception ex) { LogLine("XML 작업 생성 예외: " + ex.Message); }
+
+            if (rc != 0)
             {
-                // XML 생성 실패 시 종전 방식(부팅 트리거만)으로 폴백.
+                // 폴백: 종전 방식(부팅 트리거만 · 배터리 조건 남음)으로라도 설치해 토글이 실패하지 않게.
+                // XML 이 거부된 이유는 위 로그의 schtasks 출력으로 확인한다.
                 string inner = "\\\"" + exe + "\\\" --logon-switch-launch";
                 rc = RunSchtasks("/Create /TN \"" + TaskName + "\" /TR \"" + inner + "\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F");
+                LogLine("작업 생성(폴백 ONSTART) rc=" + rc);
             }
             // 재부팅·재로그인 없이 지금 바로 실행(즉시 피드백).
             if (rc == 0) RunSchtasks("/Run /TN \"" + TaskName + "\"");
             return rc;
+        }
+
+        /// <summary>진단용 — schtasks 결과·오류를 로그온 워커와 같은 로그 파일에 남긴다([로그 열기]로 열람).</summary>
+        private static void LogLine(string s)
+        {
+            try
+            {
+                string p = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "LogiFlow", "desktop-probe.log");
+                Directory.CreateDirectory(Path.GetDirectoryName(p));
+                File.AppendAllText(p, DateTime.Now.ToString("HH:mm:ss.fff") + "  " + s + "\r\n");
+            }
+            catch { }
         }
 
         /// <summary>부팅(BootTrigger)+로그온(LogonTrigger) 2중 트리거 SYSTEM 작업 XML.</summary>
@@ -193,15 +211,22 @@ namespace LogiFlow.Config
                 {
                     UseShellExecute = false,
                     CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
                 };
                 using (var p = Process.Start(psi))
                 {
                     if (p == null) return 1;
-                    p.WaitForExit(15000);
+                    string so = p.StandardOutput.ReadToEnd();
+                    string se = p.StandardError.ReadToEnd();
+                    if (!p.WaitForExit(15000)) { try { p.Kill(); } catch { } return 1; }
+                    if (p.ExitCode != 0)
+                        LogLine("schtasks 실패(" + p.ExitCode + "): " + args + " | "
+                            + (se + " " + so).Replace("\r", " ").Replace("\n", " ").Trim());
                     return p.ExitCode;
                 }
             }
-            catch { return 1; }
+            catch (Exception ex) { LogLine("schtasks 예외: " + ex.Message + " | args=" + args); return 1; }
         }
     }
 
