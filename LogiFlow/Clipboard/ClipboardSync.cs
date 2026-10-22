@@ -12,7 +12,7 @@ using System.Windows.Forms;
 using LogiFlow.Config;
 using LogiFlow.Diagnostics;
 
-namespace LogiFlow.Clipboard
+namespace LogiFlow.Sharing
 {
     /// <summary>
     /// 두 PC 간 클립보드 공유(텍스트·이미지). 같은 서브넷이 아니어도 상대 IP:포트로 직접 TCP 연결한다.

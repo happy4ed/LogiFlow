@@ -106,6 +106,30 @@ namespace LogiFlow.Diagnostics
 
         private static void ProbeLoop(int seconds)
         {
+            // 이 컨텍스트(SYSTEM·winlogon 데스크톱)에서 HID(=setHost 가 쓰는 경로)가 읽히는지 1회 테스트.
+            // 커서 읽기는 이미 됨 → 남은 변수는 '여기서 HID 열기/전환이 되는가'. ARM 잠금화면 전환 실패 원인 후보를 가린다.
+            // 읽기 전용(열거 + 0x1814 조회만, setHost 는 보내지 않음).
+            try
+            {
+                var dlog = new DiagLogger(AppDomain.CurrentDomain.BaseDirectory) { Enabled = false };
+                var results = new DeviceScanner(dlog).Scan();
+                int sw = 0;
+                foreach (var r in results) if (r.ChangeHostSupported) sw++;
+                Append(string.Format("--- HID 접근 테스트: 기기 {0}개 · 전환가능(0x1814) {1}개 ---", results.Count, sw));
+                foreach (var r in results)
+                {
+                    Append(string.Format("  {0} [{1}] 0x1814={2} 현재채널={3} {4}",
+                        r.DeviceName, r.VidPid,
+                        r.ChangeHostSupported ? "0x" + r.ChangeHostIndex.ToString("X2") : "미지원",
+                        r.CurrentHost >= 0 ? (r.CurrentHost + 1).ToString() : "?",
+                        string.IsNullOrEmpty(r.Note) ? "" : "(" + r.Note + ")"));
+                }
+                Append(sw > 0
+                    ? "→ 이 컨텍스트에서 HID 읽기 OK. setHost(전환)도 같은 경로라 로그온 화면 전환 구현 가능."
+                    : "→ 이 컨텍스트에서 전환 가능 기기를 못 읽음 — 여기가 ARM/잠금화면 전환 실패의 원인 후보.");
+            }
+            catch (Exception ex) { Append("HID 접근 테스트 오류: " + ex.Message); }
+
             IntPtr original = GetThreadDesktop(GetCurrentThreadId());
             long end = Environment.TickCount + seconds * 1000;
             string lastName = null;

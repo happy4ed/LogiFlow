@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Windows.Forms;
-using LogiFlow.Clipboard;
+using LogiFlow.Sharing;
 using LogiFlow.Config;
 using LogiFlow.Diagnostics;
 using LogiFlow.Handoff;
