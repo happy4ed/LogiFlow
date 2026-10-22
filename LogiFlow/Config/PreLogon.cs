@@ -93,12 +93,64 @@ namespace LogiFlow.Config
             // 중요: 로그인 전(로그온 화면)엔 사용자 %LocalAppData% 가 안 올라와 SYSTEM 이 그 경로 exe 를
             // 못 찾는다 → exe·의존 파일을 머신 공용 ProgramData 로 복사해 거기서 실행한다.
             string exe = CopyWorkerToMachine();
-            string inner = "\\\"" + exe + "\\\" --logon-switch-launch";
-            string args = "/Create /TN \"" + TaskName + "\" /TR \"" + inner + "\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F";
-            int rc = RunSchtasks(args);
-            // 재부팅 없이 지금 바로 실행(시험용).
+            // 트리거 2중(부팅 + 로그온). 부팅 ONSTART 는 환경(빠른 시작 등)에 따라 안 뜰 수 있어,
+            // '로그인하면 무조건 뜨는' 로그온 트리거를 함께 건다(단일 인스턴스 뮤텍스가 중복 차단).
+            // plain schtasks /SC 는 트리거 1개만 되므로 XML 로 생성한다.
+            int rc;
+            try
+            {
+                string xml = BuildTaskXml(exe);
+                string xmlPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "LogiFlow", "task.xml");
+                Directory.CreateDirectory(Path.GetDirectoryName(xmlPath));
+                // schtasks /XML 은 UTF-16 LE(BOM) 를 요구한다.
+                File.WriteAllText(xmlPath, xml, new System.Text.UnicodeEncoding(false, true));
+                rc = RunSchtasks("/Create /TN \"" + TaskName + "\" /XML \"" + xmlPath + "\" /RU SYSTEM /RL HIGHEST /F");
+            }
+            catch
+            {
+                // XML 생성 실패 시 종전 방식(부팅 트리거만)으로 폴백.
+                string inner = "\\\"" + exe + "\\\" --logon-switch-launch";
+                rc = RunSchtasks("/Create /TN \"" + TaskName + "\" /TR \"" + inner + "\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F");
+            }
+            // 재부팅·재로그인 없이 지금 바로 실행(즉시 피드백).
             if (rc == 0) RunSchtasks("/Run /TN \"" + TaskName + "\"");
             return rc;
+        }
+
+        /// <summary>부팅(BootTrigger)+로그온(LogonTrigger) 2중 트리거 SYSTEM 작업 XML.</summary>
+        private static string BuildTaskXml(string exe)
+        {
+            string cmd = exe.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+            var sb = new StringBuilder();
+            sb.Append("<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n");
+            sb.Append("<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n");
+            sb.Append("  <RegistrationInfo><Description>LogiFlow 로그온 화면 전환 워커</Description></RegistrationInfo>\r\n");
+            sb.Append("  <Triggers>\r\n");
+            sb.Append("    <BootTrigger><Enabled>true</Enabled></BootTrigger>\r\n");
+            sb.Append("    <LogonTrigger><Enabled>true</Enabled></LogonTrigger>\r\n");
+            sb.Append("  </Triggers>\r\n");
+            sb.Append("  <Principals><Principal id=\"Author\"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>\r\n");
+            sb.Append("  <Settings>\r\n");
+            sb.Append("    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\r\n");
+            sb.Append("    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\r\n");
+            sb.Append("    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\r\n");
+            sb.Append("    <AllowHardTerminate>true</AllowHardTerminate>\r\n");
+            sb.Append("    <StartWhenAvailable>true</StartWhenAvailable>\r\n");
+            sb.Append("    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>\r\n");
+            sb.Append("    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>\r\n");
+            sb.Append("    <AllowStartOnDemand>true</AllowStartOnDemand>\r\n");
+            sb.Append("    <Enabled>true</Enabled>\r\n");
+            sb.Append("    <Hidden>false</Hidden>\r\n");
+            sb.Append("    <RunOnlyIfIdle>false</RunOnlyIfIdle>\r\n");
+            sb.Append("    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\r\n");
+            sb.Append("    <Priority>5</Priority>\r\n");
+            sb.Append("  </Settings>\r\n");
+            sb.Append("  <Actions Context=\"Author\">\r\n");
+            sb.Append("    <Exec><Command>").Append(cmd).Append("</Command><Arguments>--logon-switch-launch</Arguments></Exec>\r\n");
+            sb.Append("  </Actions>\r\n");
+            sb.Append("</Task>\r\n");
+            return sb.ToString();
         }
 
         /// <summary>워커 exe·의존 파일을 머신 공용(ProgramData)으로 복사하고 그 exe 경로를 돌려준다.

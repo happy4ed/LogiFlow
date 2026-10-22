@@ -595,8 +595,11 @@ namespace LogiFlow
                     MessageBox.Show(this, ok ? "로그온 전 실행을 제거했습니다." : "제거가 취소되었거나 실패했습니다(관리자 권한 필요).",
                         "LogiFlow", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
                 }
-                Config.PreLogon = false;
-                _preLogonInstalled = false;
+                // 삭제 성공 여부를 낙관하지 말고 실제 작업 상태를 재조회해 반영(UAC 취소/실패로 작업이
+                // 남았는데 토글만 꺼져 보이고 재시작하면 다시 켜져 보이던 버그 방지).
+                bool stillInstalled = PreLogon.IsInstalled();
+                _preLogonInstalled = stillInstalled;
+                Config.PreLogon = stillInstalled;
                 _tray.ApplyConfig();
             }
             BeginInvoke((Action)(() => ShowPage(1)));
