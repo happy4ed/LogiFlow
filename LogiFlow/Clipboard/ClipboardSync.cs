@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -163,49 +164,6 @@ namespace LogiFlow.Sharing
                 }
             }
             catch (Exception ex) { return "실패: " + ex.Message; }
-        }
-    }
-
-    /// <summary>클립보드 수신 포트의 방화벽 인바운드 허용(관리자 권한 netsh). runas 상승 후 실행.</summary>
-    internal static class ClipFirewall
-    {
-        public const string RuleName = "LogiFlow Clipboard";
-
-        public static bool RequestAllow(int port)
-        {
-            try
-            {
-                var psi = new ProcessStartInfo(Application.ExecutablePath, "--allow-firewall=" + port) { UseShellExecute = true, Verb = "runas" };
-                using (var p = Process.Start(psi))
-                {
-                    if (p == null) return false;
-                    p.WaitForExit(15000);
-                    return p.ExitCode == 0;
-                }
-            }
-            catch (System.ComponentModel.Win32Exception) { return false; }
-            catch { return false; }
-        }
-
-        public static int DoAllow(int port)
-        {
-            RunNetsh("advfirewall firewall delete rule name=\"" + RuleName + "\"");
-            return RunNetsh("advfirewall firewall add rule name=\"" + RuleName + "\" dir=in action=allow protocol=TCP localport=" + port + " profile=any");
-        }
-
-        private static int RunNetsh(string args)
-        {
-            try
-            {
-                var psi = new ProcessStartInfo("netsh.exe", args) { UseShellExecute = false, CreateNoWindow = true };
-                using (var p = Process.Start(psi))
-                {
-                    if (p == null) return 1;
-                    p.WaitForExit(10000);
-                    return p.ExitCode;
-                }
-            }
-            catch { return 1; }
         }
 
         // ---- 송신 (UI 스레드에서 호출됨) ----
@@ -411,6 +369,49 @@ namespace LogiFlow.Sharing
                 if (m.Msg == WM_CLIPBOARDUPDATE) { try { _onUpdate(); } catch { } }
                 base.WndProc(ref m);
             }
+        }
+    }
+
+    /// <summary>클립보드 수신 포트의 방화벽 인바운드 허용(관리자 권한 netsh). runas 상승 후 실행.</summary>
+    internal static class ClipFirewall
+    {
+        public const string RuleName = "LogiFlow Clipboard";
+
+        public static bool RequestAllow(int port)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo(Application.ExecutablePath, "--allow-firewall=" + port) { UseShellExecute = true, Verb = "runas" };
+                using (var p = Process.Start(psi))
+                {
+                    if (p == null) return false;
+                    p.WaitForExit(15000);
+                    return p.ExitCode == 0;
+                }
+            }
+            catch (System.ComponentModel.Win32Exception) { return false; }
+            catch { return false; }
+        }
+
+        public static int DoAllow(int port)
+        {
+            RunNetsh("advfirewall firewall delete rule name=\"" + RuleName + "\"");
+            return RunNetsh("advfirewall firewall add rule name=\"" + RuleName + "\" dir=in action=allow protocol=TCP localport=" + port + " profile=any");
+        }
+
+        private static int RunNetsh(string args)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("netsh.exe", args) { UseShellExecute = false, CreateNoWindow = true };
+                using (var p = Process.Start(psi))
+                {
+                    if (p == null) return 1;
+                    p.WaitForExit(10000);
+                    return p.ExitCode;
+                }
+            }
+            catch { return 1; }
         }
     }
 }
