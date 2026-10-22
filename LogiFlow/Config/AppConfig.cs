@@ -34,6 +34,7 @@ namespace LogiFlow.Config
         public string ClipPeerHost = "";          // 상대 PC IP/호스트명
         public int ClipPort = 48737;              // 양쪽 같은 포트
         public string ClipSecret = "";            // 암호문구(AES+HMAC 키 유도). 양쪽 동일해야.
+        public bool DebugMode = false;            // 상세 디버그 로그(로그온 전환 워커·클립보드).
         public ThemeMode Theme = ThemeMode.System;
         public readonly List<EdgeAttachment> Attachments = new List<EdgeAttachment>();
         public readonly Dictionary<int, string> Aliases = new Dictionary<int, string>(); // 채널(0-base)→별칭
@@ -107,6 +108,7 @@ namespace LogiFlow.Config
                             if (int.TryParse(val, out cp) && cp >= 1 && cp <= 65535) cfg.ClipPort = cp;
                             break;
                         case "clipSecret": cfg.ClipSecret = val; break;
+                        case "debug": cfg.DebugMode = val == "1"; break;
                         case "theme":
                             int tm;
                             if (int.TryParse(val, out tm) && tm >= 0 && tm <= 2) cfg.Theme = (ThemeMode)tm;
@@ -166,6 +168,7 @@ namespace LogiFlow.Config
                 sb.AppendLine("clipHost=" + (ClipPeerHost ?? ""));
                 sb.AppendLine("clipPort=" + ClipPort.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("clipSecret=" + (ClipSecret ?? ""));
+                sb.AppendLine("debug=" + (DebugMode ? "1" : "0"));
                 sb.AppendLine("theme=" + ((int)Theme).ToString(CultureInfo.InvariantCulture));
                 foreach (var kv in Aliases)
                 {

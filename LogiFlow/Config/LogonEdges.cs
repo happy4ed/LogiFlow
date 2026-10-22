@@ -29,6 +29,24 @@ namespace LogiFlow.Config
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "LogiFlow"); }
         }
         public static string FilePath { get { return Path.Combine(Dir, "logon-edges.txt"); } }
+        /// <summary>세션 잠금 상태 플래그 — 사용자 세션이 잠김 시 생성, 해제 시 삭제. 워커가 읽는다.</summary>
+        public static string LockFlagPath { get { return Path.Combine(Dir, "locked.flag"); } }
+
+        public static void SetLocked(bool locked)
+        {
+            try
+            {
+                Directory.CreateDirectory(Dir);
+                if (locked) File.WriteAllText(LockFlagPath, DateTime.Now.ToString("s"));
+                else if (File.Exists(LockFlagPath)) File.Delete(LockFlagPath);
+            }
+            catch { }
+        }
+
+        public static bool IsLocked()
+        {
+            try { return File.Exists(LockFlagPath); } catch { return false; }
+        }
 
         public static void Write(AppConfig cfg)
         {
@@ -38,6 +56,7 @@ namespace LogiFlow.Config
                 var sb = new StringBuilder();
                 sb.AppendLine("dwellMs=" + cfg.DwellMs.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("myHost=" + cfg.MyHost.ToString(CultureInfo.InvariantCulture));
+                sb.AppendLine("debug=" + (cfg.DebugMode ? "1" : "0"));
                 foreach (var a in cfg.Attachments)
                 {
                     int idx = -1;
@@ -56,9 +75,9 @@ namespace LogiFlow.Config
             try { if (File.Exists(FilePath)) File.Delete(FilePath); } catch { }
         }
 
-        public static List<LogonEdge> Read(out int dwellMs, out int myHost)
+        public static List<LogonEdge> Read(out int dwellMs, out int myHost, out bool debug)
         {
-            dwellMs = 330; myHost = -1;
+            dwellMs = 330; myHost = -1; debug = false;
             var list = new List<LogonEdge>();
             try
             {
@@ -69,6 +88,7 @@ namespace LogiFlow.Config
                     if (line.Length == 0) continue;
                     if (line.StartsWith("dwellMs=")) { int d; if (int.TryParse(line.Substring(8), out d)) dwellMs = d; continue; }
                     if (line.StartsWith("myHost=")) { int m; if (int.TryParse(line.Substring(7), out m)) myHost = m; continue; }
+                    if (line.StartsWith("debug=")) { debug = line.Substring(6) == "1"; continue; }
                     if (line.StartsWith("edge\t"))
                     {
                         string[] p = line.Split('\t');

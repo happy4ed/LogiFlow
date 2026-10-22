@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Win32;
 using LogiFlow.Sharing;
 using LogiFlow.Config;
 using LogiFlow.Diagnostics;
@@ -63,6 +64,10 @@ namespace LogiFlow
                 try { if (_tray != null) _tray.ShowBalloonTip(3500, "LogiFlow 클립보드", "데이터는 받았지만 열지 못했습니다 — 양쪽 암호문구가 다릅니다.", ToolTipIcon.Warning); } catch { }
             };
             _clip.Apply(Config);
+
+            // 세션 잠금/해제를 워커에 알리는 플래그(ARM 은 잠금 시 데스크톱 이름이 Default 라 이름만으론 구분 불가).
+            LogonEdges.SetLocked(false);
+            SystemEvents.SessionSwitch += OnSessionSwitch;
 
             BuildTray();
             AutoStart.Apply(Config.AutoStart);
@@ -283,10 +288,21 @@ namespace LogiFlow
             _settings.ShowSettings();
         }
 
+        private void OnSessionSwitch(object s, SessionSwitchEventArgs e)
+        {
+            try
+            {
+                if (e.Reason == SessionSwitchReason.SessionLock) LogonEdges.SetLocked(true);
+                else if (e.Reason == SessionSwitchReason.SessionUnlock) LogonEdges.SetLocked(false);
+            }
+            catch { }
+        }
+
         private void ExitApp()
         {
             if (_exiting) return;
             _exiting = true;
+            try { SystemEvents.SessionSwitch -= OnSessionSwitch; } catch { }
             try { _watcher.Dispose(); } catch { }
             try { _glow.Dispose(); } catch { }
             try { if (_clip != null) _clip.Dispose(); } catch { }

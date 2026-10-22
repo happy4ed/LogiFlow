@@ -320,8 +320,9 @@ namespace LogiFlow.Diagnostics
             Append("==================================================");
             Append("logon-switch 워커 시작 · 계정=" + who);
 
-            int dwellMs, myHost;
-            List<LogonEdge> cfgEdges = LogonEdges.Read(out dwellMs, out myHost);
+            int dwellMs, myHost; bool debug;
+            List<LogonEdge> cfgEdges = LogonEdges.Read(out dwellMs, out myHost, out debug);
+            Append("설정 파일 = " + LogonEdges.FilePath + " · 디버그=" + (debug ? "켜짐" : "꺼짐"));
 
             var hlog = new DiagLogger(AppDomain.CurrentDomain.BaseDirectory) { Enabled = true };
             var switchable = new List<ScanResult>();
@@ -334,27 +335,39 @@ namespace LogiFlow.Diagnostics
             Append(string.Format("엣지 {0}개 · 전환가능 기기 {1}개 · dwell={2}ms", cfgEdges.Count, switchable.Count, dwellMs));
 
             Screen[] scr = Screen.AllScreens;
+            if (debug)
+            {
+                Append("모니터 " + scr.Length + "개(워커 기준 좌표):");
+                for (int i = 0; i < scr.Length; i++)
+                    Append(string.Format("  [{0}] {1} bounds=({2},{3} {4}x{5}){6}",
+                        i, scr[i].DeviceName, scr[i].Bounds.Left, scr[i].Bounds.Top, scr[i].Bounds.Width, scr[i].Bounds.Height,
+                        scr[i].Primary ? " 주" : ""));
+            }
             var dets = new List<EdgeDet>();
             foreach (var e in cfgEdges)
             {
                 Screen s = null;
                 foreach (var sc in scr) if (sc.DeviceName == e.Device) { s = sc; break; }
                 if (s == null && e.Index >= 0 && e.Index < scr.Length) s = scr[e.Index];
-                if (s == null) continue;
+                if (s == null) { Append("엣지 매칭 실패(모니터 없음): " + e.Device + " idx=" + e.Index); continue; }
                 var b = s.Bounds;
-                dets.Add(new EdgeDet
+                var det = new EdgeDet
                 {
                     Det = new EdgeDetector { DwellMs = dwellMs },
                     Rect = new HandoffRect(b.Left, b.Top, b.Width, b.Height),
                     Edge = (HandoffEdge)e.Edge,
                     Channel = e.Channel,
                     Label = s.DeviceName + " " + (HandoffEdge)e.Edge
-                });
+                };
+                dets.Add(det);
+                if (debug) Append(string.Format("엣지 등록: {0} mon=({1},{2} {3}x{4}) → 채널 {5}",
+                    det.Label, b.Left, b.Top, b.Width, b.Height, det.Channel + 1));
             }
+            if (dets.Count == 0) Append("※ 적용할 엣지 0개 — [전환 관리]에서 채널 박스를 변에 붙였는지 확인하세요.");
 
             IntPtr original = GetThreadDesktop(GetCurrentThreadId());
             int lastX = 0, lastY = 0; bool haveLast = false;
-            long lastSwitch = 0;
+            long lastSwitch = 0, lastDebug = 0, lastConfigRead = 0;
             string lastName = null;
 
             while (true)
@@ -364,24 +377,52 @@ namespace LogiFlow.Diagnostics
                 if (hIn == IntPtr.Zero) { haveLast = false; continue; }
                 string name = DesktopName(hIn);
                 bool secure = !string.Equals(name, "Default", StringComparison.OrdinalIgnoreCase);
+                bool locked = LogonEdges.IsLocked();
+                // 전환 감지 ON 조건: 보안 데스크톱(로그온 화면) 또는 세션 잠김(ARM 은 잠금 때도 Default 로 보임).
+                bool active = secure || locked;
                 POINT p = new POINT(); bool got = false;
-                if (secure)
+                // active 또는 디버그면 커서를 읽는다(일반 상태 디버그 로깅 포함).
+                if (active || debug)
                 {
                     if (SetThreadDesktop(hIn)) got = GetCursorPos(out p);
                     if (original != IntPtr.Zero) SetThreadDesktop(original);
                 }
                 CloseDesktop(hIn);
 
+                long now = Environment.TickCount;
+                // 디버그 토글을 재부팅 없이 반영 — 설정 파일을 주기적으로 재읽기.
+                if (now - lastConfigRead > 4000)
+                {
+                    lastConfigRead = now;
+                    int d1, m1; bool dbg;
+                    LogonEdges.Read(out d1, out m1, out dbg);
+                    if (dbg != debug) { debug = dbg; Append("디버그 모드 " + (debug ? "켜짐" : "꺼짐") + " (설정 반영)"); }
+                }
                 if (name != lastName)
                 {
-                    Append("입력 데스크톱=" + name + (secure ? " (보안 — 여기서 전환 감지)" : " (일반 — 사용자 세션 담당)"));
+                    Append("입력 데스크톱=" + name + " · 잠김=" + (locked ? "Y" : "N") + (active ? " → 전환 감지 ON" : " → OFF(사용자 세션 담당)"));
                     lastName = name;
                 }
-                if (!secure || !got) { haveLast = false; foreach (var d in dets) d.Det.Reset(true); continue; }
+
+                if (debug && got && now - lastDebug > 400)
+                {
+                    var sb = new StringBuilder();
+                    sb.Append(string.Format("desktop={0} secure={1} locked={2} active={3} cursor=({4},{5})",
+                        name, secure ? "Y" : "N", locked ? "Y" : "N", active ? "Y" : "N", p.X, p.Y));
+                    foreach (var d in dets)
+                    {
+                        int dist = EdgeDetector.DistanceFromEdge(d.Rect, d.Edge, p.X, p.Y);
+                        sb.Append(string.Format(" | {0} dist={1} band={2} dwell={3:0.00}",
+                            d.Label, dist, dist <= EdgeDetector.DefaultBandPx ? "Y" : "N", d.Det.Progress(now)));
+                    }
+                    Append(sb.ToString());
+                    lastDebug = now;
+                }
+
+                if (!active || !got) { haveLast = false; foreach (var d in dets) d.Det.Reset(true); continue; }
 
                 int dx = haveLast ? p.X - lastX : 0, dy = haveLast ? p.Y - lastY : 0;
                 lastX = p.X; lastY = p.Y; haveLast = true;
-                long now = Environment.TickCount;
                 if (now - lastSwitch < 1200) continue;
 
                 foreach (var d in dets)

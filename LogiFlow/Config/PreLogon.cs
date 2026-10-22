@@ -94,7 +94,10 @@ namespace LogiFlow.Config
             // 세션0 런처 → winlogon 데스크톱에 '로그온 전환 워커' 투입(엣지 설정은 머신 공유 파일에서).
             string inner = "\\\"" + exe + "\\\" --logon-switch-launch";
             string args = "/Create /TN \"" + TaskName + "\" /TR \"" + inner + "\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F";
-            return RunSchtasks(args);
+            int rc = RunSchtasks(args);
+            // 재부팅 없이 지금 바로 실행(시험용). 기존 워커가 돌고 있으면 schtasks 가 중복 실행 안 함.
+            if (rc == 0) RunSchtasks("/Run /TN \"" + TaskName + "\"");
+            return rc;
         }
 
         public static int DoUninstall()

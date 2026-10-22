@@ -491,13 +491,15 @@ namespace LogiFlow
             y += 2 * 60 + 16;
 
             var g3 = GroupHead("전환 · 진단"); g3.Location = new Point(24, y); page.Controls.Add(g3); y += 22;
-            var swCard = Card(24, y, W, 2 * 60);
+            var swCard = Card(24, y, W, 3 * 60);
             AddSettingRow(swCard, 0, "가장자리 자동 전환 사용", "모니터 변에 붙인 채널로 커서를 밀면 자동 전환합니다.", false,
                 Config.EdgeSwitchEnabled, (on) => { Config.EdgeSwitchEnabled = on; _tray.ApplyConfig(); });
             AddSettingRow(swCard, 60, "진단 로그 남기기", "엣지 판정·전환 트리거를 로그 폴더에 기록합니다.", false,
                 Config.DiagLogEnabled, (on) => { Config.DiagLogEnabled = on; Log.Enabled = on; _tray.ApplyConfig(); });
+            AddSettingRow(swCard, 120, "상세 디버그 로그", "로그온 전환 워커가 커서·엣지별 거리·dwell 을 상세 기록(안 될 때 원인 추적). 켜면 몇 초 뒤 반영.", true,
+                Config.DebugMode, (on) => { Config.DebugMode = on; _tray.ApplyConfig(); });
             page.Controls.Add(swCard);
-            y += 2 * 60 + 16;
+            y += 3 * 60 + 16;
 
             // 클립보드 공유
             var g4 = GroupHead("클립보드 공유"); g4.Location = new Point(24, y); page.Controls.Add(g4); y += 22;
