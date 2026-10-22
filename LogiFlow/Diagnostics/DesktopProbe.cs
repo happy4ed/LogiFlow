@@ -95,6 +95,17 @@ namespace LogiFlow.Diagnostics
             Append("==================================================");
             Append(string.Format("desktop-probe 시작 · 실행 계정={0} · {1}초 · 지금부터 잠금(Win+L) 또는 로그인 화면에서 마우스를 움직여 보세요", who, seconds));
 
+            // SetThreadDesktop 은 '창·훅 없는' 스레드에서만 성공한다. [STAThread] 메인 스레드는 .NET 이 STA COM
+            // 용 숨은 창을 만들어 err170(ERROR_BUSY)로 실패하므로, 데스크톱/커서 작업은 새 MTA 워커에서 수행한다.
+            var worker = new Thread(() => ProbeLoop(seconds));
+            worker.IsBackground = false;
+            try { worker.SetApartmentState(ApartmentState.MTA); } catch { }
+            worker.Start();
+            worker.Join((seconds + 10) * 1000);
+        }
+
+        private static void ProbeLoop(int seconds)
+        {
             IntPtr original = GetThreadDesktop(GetCurrentThreadId());
             long end = Environment.TickCount + seconds * 1000;
             string lastName = null;

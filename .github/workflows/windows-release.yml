@@ -7,7 +7,7 @@ on:
       - '.github/workflows/windows-release.yml'
       - 'LogiFlow/**'
       - 'build/windows/**'
-      - 'docs/RELEASE_NOTES_v0.10.3.md'
+      - 'docs/RELEASE_NOTES_v0.10.4.md'
   workflow_dispatch:
     inputs:
       publish:
@@ -114,4 +114,4 @@ jobs:
           (cd release-assets && sha256sum --check "LogiFlow-v${VERSION}-SHA256SUMS.txt")
           gh release create "v${VERSION}" release-assets/* \
             --target "$COMMIT_SHA" --title "LogiFlow ${VERSION}" \
-            --notes-file docs/RELEASE_NOTES_v0.10.3.md --latest
+            --notes-file docs/RELEASE_NOTES_v0.10.4.md --latest
