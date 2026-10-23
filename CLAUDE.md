@@ -11,7 +11,16 @@ autographer 마스터 규칙을 상속하되, LogiFlow 는 **자체 origin 을 �
 - 참조 레포: `happy4ed/Logitech-MX-Auto-Switch`(hidapitester 기반). 우리는 외부 exe
   의존 없이 Windows HID API P/Invoke 로 자체 구현.
 
-## 현재 판: 0.9.0 — UI 일관성(버튼 폰트 통일·토글 키움) · 폭 상한 · 캔버스 스크롤 · 로그온 전 정정
+## 브랜치 (2026-10-23 회장님 지시)
+
+- `main` = B안(서비스 단일 전담) 계열. 0.14.3 실기 확인 후 `logiflow-plus` 를 main 으로 빨리감기했다.
+- `legacy-0.13.5` = 옛 main(트레이 감시 방식 0.13.5 · 2cf6efe). 더 고치지 않는 고정 브랜치.
+- 릴리스: 커밋 메시지 `ship:` → `release-all.yml` 이 Windows·Mac·Linux 를 한 릴리스(Latest)로 낸다.
+  세 OS 버전은 같은 번호로 올린다(AssemblyInfo · `mac/VERSION` · `linux/VERSION` · `docs/RELEASE_NOTES_v<ver>.md`).
+
+## 현재 판: 0.15.0 — Windows(B안 0.14.3 코드) · Mac(전환·변 밀기·glow 첫 판) · Linux(CLI) 통합 릴리스
+
+## 이전 판: 0.9.0 — UI 일관성(버튼 폰트 통일·토글 키움) · 폭 상한 · 캔버스 스크롤 · 로그온 전 정정
 
 - 버튼 폰트 9pt 고정(Form 상속 제거) · 토글 40×22 · 콘텐츠 열 폭 상한 `ContentMax=560`(`Cw`) · 창 820×660(최소 760×600).
 - 전환 캔버스 = AutoScroll 호스트 안 `MonitorLayoutPanel`(고정 스케일 주모니터≈180px · `RelayoutToHost` · 넘치면 상하좌우 스크롤).
