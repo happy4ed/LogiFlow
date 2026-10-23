@@ -2,7 +2,7 @@ name: Linux build and release
 
 on:
   push:
-    branches: [main]
+    branches: [main, logiflow-plus]
     paths:
       - '.github/workflows/linux-release.yml'
       - 'linux/**'
