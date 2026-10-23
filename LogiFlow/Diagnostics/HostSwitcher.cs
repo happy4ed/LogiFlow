@@ -80,5 +80,57 @@ namespace LogiFlow.Diagnostics
             log.Log(string.Format("=== 전체 전환 종료: {0}개 전송 ===", sent));
             return sent;
         }
+
+        /// <summary>
+        /// 로그온 워커 전용 — 각 기기 전환을 '보이는 로그'(say)에 기기별로 남기고, 전환이 확인될 때까지
+        /// 짧게 재시도한다(콜드부팅 로그인 전엔 HID++ 명령 파이프가 덜 깨어 첫 쓰기가 무시될 수 있음).
+        /// 쓰기 경로는 기존 HidppDevice.SetHost 하나뿐이며 안전 가드(지원·범위)는 SwitchOne 과 동일하게 적용한다.
+        /// 전환 성공 판정: setHost 쓰기 성공 + (전환되어 응답 사라짐 || getHostInfo 현재채널==목표).
+        /// </summary>
+        public static int SwitchAllVerbose(IEnumerable<ScanResult> devices, int targetHost, DiagLogger raw, Action<string> say, int attempts)
+        {
+            int switched = 0;
+            foreach (var d in devices)
+            {
+                if (d == null || d.Interface == null) continue;
+                // (a) 0x1814 지원 (b) 채널 범위 — SwitchOne 과 동일 가드.
+                if (!d.ChangeHostSupported || d.ChangeHostIndex == 0)
+                {
+                    say(string.Format("  {0}: 0x1814 미지원 — 건너뜀", d.DeviceName));
+                    continue;
+                }
+                if (targetHost < 0 || (d.HostCount >= 0 && targetHost >= d.HostCount))
+                {
+                    say(string.Format("  {0}: 채널 {1} 범위 밖(호스트 {2}) — 건너뜀", d.DeviceName, targetHost + 1, d.HostCount));
+                    continue;
+                }
+
+                bool ok = false;
+                for (int a = 1; a <= attempts && !ok; a++)
+                {
+                    HidStream stream = null;
+                    try
+                    {
+                        stream = HidStream.Open(d.Interface);
+                        var hidpp = new HidppDevice(stream, raw);
+                        // 명령 파이프 깨우기(ping) — 콜드부팅 직후 첫 명령이 무시되는 것 완화.
+                        try { hidpp.Ping(d.DeviceIndex, 200); } catch { }
+                        bool wrote = hidpp.SetHost(d.DeviceIndex, d.ChangeHostIndex, (byte)targetHost, WriteTimeoutMs);
+                        int nb, cur; bool got = hidpp.GetHostInfo(d.DeviceIndex, d.ChangeHostIndex, 300, out nb, out cur);
+                        // 전환되면 기기가 이 리시버에서 사라져 getHostInfo 응답이 없는 게 정상(= 성공 신호).
+                        if (wrote && (!got || cur == targetHost)) ok = true;
+                        say(string.Format("  {0}: 시도{1} 쓰기={2} 확인={3} → {4}",
+                            d.DeviceName, a, wrote ? "성공" : "실패",
+                            got ? ("현재채널 " + (cur + 1)) : "응답없음(전환추정)",
+                            ok ? "전환됨" : "미전환"));
+                    }
+                    catch (Exception ex) { say(string.Format("  {0}: 시도{1} 예외 {2}", d.DeviceName, a, ex.Message)); }
+                    finally { if (stream != null) stream.Dispose(); }
+                    if (!ok) System.Threading.Thread.Sleep(150);
+                }
+                if (ok) switched++;
+            }
+            return switched;
+        }
     }
 }

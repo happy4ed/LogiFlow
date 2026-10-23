@@ -493,7 +493,8 @@ namespace LogiFlow.Diagnostics
                         List<ScanResult> sw; lock (scanLock) sw = sharedBox[0];
                         if (sw.Count == 0)
                             Append("  전환가능 기기 0개 — 마우스·키보드가 아직 자고 있음(한 번 움직여/눌러 깨우면 다음 밀기에 전환).");
-                        try { int sent = HostSwitcher.SwitchAll(sw, d.Channel, hlog); Append("  setHost 전송 " + sent + "개"); }
+                        // 기기별 쓰기 결과를 '보이는 로그'에 남기고, 콜드부팅 대비 확인·재시도(최대 3회).
+                        try { int ok = HostSwitcher.SwitchAllVerbose(sw, d.Channel, hlog, Append, 3); Append("  setHost 전환 " + ok + "/" + sw.Count + "개"); }
                         catch (Exception ex) { Append("  setHost 오류: " + ex.Message); }
                         lastSwitch = now;
                         foreach (var o in dets) o.Det.Reset(true);
