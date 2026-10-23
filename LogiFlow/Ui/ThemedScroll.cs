@@ -141,6 +141,9 @@ namespace LogiFlow.Ui
             if (m.Msg != WM_MOUSEWHEEL || !Visible || !IsHandleCreated) return false;
             try
             {
+                // 겹친/모달 창 위에서 돌린 휠을 뒤 창 패널이 가로채던 버그 방지: 자기 폼이 활성 폼일 때만 처리.
+                var f = FindForm();
+                if (f == null || f != Form.ActiveForm) return false;
                 Point local = PointToClient(Cursor.Position);
                 if (!ClientRectangle.Contains(local)) return false;
                 int delta = (short)((m.WParam.ToInt64() >> 16) & 0xffff);
