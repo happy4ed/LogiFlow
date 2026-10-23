@@ -82,7 +82,7 @@ namespace LogiFlow.Diagnostics
             // self-exit: 콘솔 세션이 바뀌면(로그아웃/사용자 전환) 종료 → supervisor 가 교체.
             uint mySession = unchecked((uint)System.Diagnostics.Process.GetCurrentProcess().SessionId);
             int off = 0;
-            var exitTimer = new Timer { Interval = 1000 };
+            var exitTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             exitTimer.Tick += (s, e) =>
             {
                 try
