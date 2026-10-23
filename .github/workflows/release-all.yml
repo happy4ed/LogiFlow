@@ -1,0 +1,79 @@
+name: Release all platforms
+
+# 커밋 메시지가 "ship:" 으로 시작하면 Windows·macOS·Linux 를 한꺼번에 빌드해 릴리스 하나(Latest)로 낸다.
+# 판마다 세 OS 파일이 한 페이지에 모이고, 버전 없는 고정 이름 사본도 올려
+# releases/latest/download/<고정 이름> 링크가 늘 최신을 가리킨다.
+on:
+  push:
+    branches: [main, logiflow-plus]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-all-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    if: startsWith(github.event.head_commit.message, 'ship:')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/windows-release.yml
+
+  mac:
+    if: startsWith(github.event.head_commit.message, 'ship:')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/mac-release.yml
+
+  linux:
+    if: startsWith(github.event.head_commit.message, 'ship:')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/linux-release.yml
+
+  publish:
+    needs: [windows, mac, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check versions match
+        env:
+          WIN: ${{ needs.windows.outputs.version }}
+          MAC: ${{ needs.mac.outputs.version }}
+          LNX: ${{ needs.linux.outputs.version }}
+        run: |
+          set -euo pipefail
+          echo "windows=$WIN mac=$MAC linux=$LNX"
+          if [ "$WIN" != "$MAC" ] || [ "$WIN" != "$LNX" ]; then echo "버전 불일치"; exit 1; fi
+          test -f "docs/RELEASE_NOTES_v${WIN}.md"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: LogiFlow-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify, add stable names, publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.windows.outputs.version }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          ls -la
+          sha256sum --check "LogiFlow-v${VERSION}-SHA256SUMS.txt"
+          sha256sum --check "LogiFlow-v${VERSION}-mac-SHA256SUMS.txt"
+          sha256sum --check "LogiFlow-v${VERSION}-linux-SHA256SUMS.txt"
+          # 고정 이름 사본(북마크용 최신 링크).
+          cp "LogiFlow-v${VERSION}-setup.exe" LogiFlow-windows-setup.exe
+          cp "LogiFlow-v${VERSION}-mac.dmg" LogiFlow-mac.dmg
+          cp "LogiFlow-v${VERSION}-linux-x64.tar.gz" LogiFlow-linux-x64.tar.gz
+          cp "LogiFlow-v${VERSION}-linux-arm64.tar.gz" LogiFlow-linux-arm64.tar.gz
+          cd ..
+          gh release create "v${VERSION}" release-assets/* \
+            --target "$COMMIT_SHA" --title "LogiFlow ${VERSION} — Windows · Mac · Linux" \
+            --notes-file "docs/RELEASE_NOTES_v${VERSION}.md" --latest

@@ -6,6 +6,10 @@ on:
     paths:
       - '.github/workflows/linux-release.yml'
       - 'linux/**'
+  workflow_call:
+    outputs:
+      version:
+        value: ${{ jobs.build.outputs.version }}
   workflow_dispatch:
     inputs:
       publish:
@@ -61,14 +65,14 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           for ARCH in x64 arm64; do
-            NAME="LogiFlow-linux-v${VERSION}-${ARCH}"
+            NAME="LogiFlow-v${VERSION}-linux-${ARCH}"
             mkdir -p "stage/$NAME"
             cp "out/linux-$ARCH/logiflow" "stage/$NAME/"
             cp linux/dist-files/* linux/README.md "stage/$NAME/"
             chmod +x "stage/$NAME/logiflow" "stage/$NAME/"*.sh
             tar -C stage -czf "dist/$NAME.tar.gz" "$NAME"
           done
-          (cd dist && sha256sum *.tar.gz > "LogiFlow-linux-v${VERSION}-SHA256SUMS.txt")
+          (cd dist && sha256sum *.tar.gz > "LogiFlow-v${VERSION}-linux-SHA256SUMS.txt")
           ls -la dist
       - uses: actions/upload-artifact@v4
         with:
@@ -97,7 +101,7 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          (cd release-assets && sha256sum --check "LogiFlow-linux-v${VERSION}-SHA256SUMS.txt")
+          (cd release-assets && sha256sum --check "LogiFlow-v${VERSION}-linux-SHA256SUMS.txt")
           gh release create "linux-v${VERSION}" release-assets/* \
             --target "$COMMIT_SHA" --title "LogiFlow Linux ${VERSION}" \
             --notes-file linux/docs/RELEASE_NOTES_linux_v0.1.0.md --prerelease

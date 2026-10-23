@@ -1,8 +1,19 @@
 # LogiFlow
 
-로지텍 Easy-Switch 엣지 전환 프로젝트. 현재 판(0.2.0)은 HID++ 진단 + 수동 전환 테스트다.
-MX Master 4·MX Mechanical 등 로지텍 기기를 감지해 현재 채널을 읽고, 버튼으로 모든
-전환 가능 기기를 같은 PC 채널로 함께 전환한다. 엣지 자동 감지는 다음 판.
+## 다운로드 (늘 최신)
+
+| 운영체제 | 받기 |
+|---|---|
+| Windows | [LogiFlow-windows-setup.exe](https://github.com/happy4ed/LogiFlow/releases/latest/download/LogiFlow-windows-setup.exe) |
+| Mac | [LogiFlow-mac.dmg](https://github.com/happy4ed/LogiFlow/releases/latest/download/LogiFlow-mac.dmg) |
+| Linux x64 | [LogiFlow-linux-x64.tar.gz](https://github.com/happy4ed/LogiFlow/releases/latest/download/LogiFlow-linux-x64.tar.gz) |
+| Linux ARM | [LogiFlow-linux-arm64.tar.gz](https://github.com/happy4ed/LogiFlow/releases/latest/download/LogiFlow-linux-arm64.tar.gz) |
+
+판별 기록은 [Releases](https://github.com/happy4ed/LogiFlow/releases) — 맨 위 Latest 한 판에 세 OS 파일이 같이 있다.
+
+로지텍 Easy-Switch 엣지 전환 프로젝트. 현재 판 0.15.0 — Windows(변 밀기 전환·glow·로그온 화면
+서비스) · Mac(전환·변 밀기·glow 첫 판, `mac/`) · Linux(터미널 CLI, `linux/`).
+아래 1~2절은 초기(0.2.0) 진단 판 설명이 남아 있다.
 
 쓰기는 0x1814 func1 setHost 하나뿐이며 (a)0x1814 지원 기기 (b)채널 0~(hostCount-1) 범위
 (c)전환 버튼 클릭 — 이 3조건에서만 전송한다. 그 외 쓰기는 하지 않는다.

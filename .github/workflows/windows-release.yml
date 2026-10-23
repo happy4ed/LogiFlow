@@ -8,6 +8,10 @@ on:
       - 'LogiFlow/**'
       - 'build/windows/**'
       - 'docs/RELEASE_NOTES_v0.13.5.md'
+  workflow_call:
+    outputs:
+      version:
+        value: ${{ jobs.build.outputs.version }}
   workflow_dispatch:
     inputs:
       publish:
