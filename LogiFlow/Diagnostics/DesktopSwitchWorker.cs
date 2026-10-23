@@ -4,6 +4,7 @@ using System.Threading;
 using System.Windows.Forms;
 using LogiFlow.Config;
 using LogiFlow.Handoff;
+using LogiFlow.Ui;
 
 namespace LogiFlow.Diagnostics
 {
@@ -75,7 +76,9 @@ namespace LogiFlow.Diagnostics
                 catch (Exception ex) { say("  전환 오류: " + ex.Message); }
             };
 
-            var watcher = new EdgeWatcher(log, onTrigger, null);
+            // glow 오버레이도 이 워커가 바탕화면 데스크탑에 그린다(트레이 감시를 끈 자리 대체).
+            var glow = new GlowController();
+            var watcher = new EdgeWatcher(log, onTrigger, glow.Update);
             watcher.Configure(cfg);
             watcher.Start();
 
@@ -100,6 +103,8 @@ namespace LogiFlow.Diagnostics
 
             Application.Run(new ApplicationContext());
             try { watcher.Stop(); }
+            catch { }
+            try { glow.Dispose(); }
             catch { }
         }
 
