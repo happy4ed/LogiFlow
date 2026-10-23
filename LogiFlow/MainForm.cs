@@ -551,6 +551,17 @@ namespace LogiFlow
             page.Controls.Add(clipCard);
             y += 4 * 60 + 20;
 
+            // 정보 — 오픈소스 라이선스
+            var g5 = GroupHead("정보"); g5.Location = new Point(24, y); page.Controls.Add(g5); y += 22;
+            var infoCard = Card(24, y, W, 60);
+            var il = new Label { Text = "오픈소스 라이선스", AutoSize = true, Font = UiFont.Get(9.5f, FontStyle.Bold), ForeColor = Theme.Ink, Left = 16, Top = 12 };
+            var il2 = new Label { Text = "LogiFlow 와 사용된 구성요소의 라이선스(MIT).", AutoSize = false, Font = UiFont.Get(8.5f), ForeColor = Theme.Muted, Left = 16, Top = 32, Width = W - 120, Height = 18 };
+            var ib = new ThemedButton { Text = "보기", Width = 64, Height = 26, Top = 17, Left = W - 80 };
+            ib.Click += (s, e) => LicenseDialog.Show(this);
+            infoCard.Controls.Add(il); infoCard.Controls.Add(il2); infoCard.Controls.Add(ib);
+            page.Controls.Add(infoCard);
+            y += 60 + 20;
+
             page.Height = y;
             return page;
         }
@@ -586,32 +597,68 @@ namespace LogiFlow
                     BeginInvoke((Action)(() => ShowPage(1)));
                     return;
                 }
-                // 머신 공유 엣지 설정을 먼저 쓴 뒤 SYSTEM 작업 설치(상승).
-                LogonEdges.Write(Config);
-                bool ok = PreLogon.RequestEnable(Config.MyHost);
+                // 설치는 UAC 상승 + 서비스 등록이라 몇 초 걸린다 → 모달로 단계 표시(처리 중 다른 조작 차단).
+                bool ok = false;
+                var modal = new ProgressModal("로그온 전에도 실행 — 켜는 중");
+                var hOn = modal.Handle; GC.KeepAlive(hOn);   // 핸들 선생성(백그라운드 Invoke 안전)
+                var tOn = new System.Threading.Thread(() =>
+                {
+                    try
+                    {
+                        modal.SetStep("채널 배치 저장 중…");
+                        LogonEdges.Write(Config);   // 머신 공유 엣지 설정 먼저 기록
+                        modal.SetStep("관리자 권한 요청 → 서비스 등록 중…\r\nUAC 창이 뜨면 '예'를 눌러 주세요.");
+                        ok = PreLogon.RequestEnable(Config.MyHost);
+                        modal.SetStep("마무리 중…");
+                    }
+                    catch { }
+                    finally { modal.Done(); }
+                });
+                try { tOn.SetApartmentState(System.Threading.ApartmentState.STA); } catch { }
+                tOn.IsBackground = true; tOn.Start();
+                modal.ShowDialog(this);
+                modal.Dispose();
+
                 Config.PreLogon = ok;
-                _preLogonInstalled = ok;   // 설치 성공값 신뢰 — 직후 schtasks 재조회(불안정)로 토글이 꺼지는 버그 방지
+                _preLogonInstalled = ok;   // 설치 성공값 신뢰
                 _tray.ApplyConfig();
                 MessageBox.Show(this, ok
-                    ? "로그온 전 실행을 설치했습니다.\r\n이제 잠금/로그인 화면에서도 가장자리로 밀면 전환됩니다.\r\n\r\n※ 리시버/동글이 이 PC 에 있어야 하며, 다음 부팅부터 완전히 적용됩니다. 지금 잠금(Win+L)으로도 시험할 수 있습니다."
-                    : "설치가 취소되었거나 실패했습니다.\r\n관리자 권한(UAC)이 필요하며, 회사 관리 PC 정책이 막을 수 있습니다.",
+                    ? "로그온 전에도 실행을 켰습니다.\r\n이제 콜드부팅·로그인·잠금 화면에서 가장자리로 밀면 전환됩니다(서비스 상주).\r\n\r\n※ 리시버/동글이 이 PC 에 있어야 하고, 콜드부팅 로그온 화면에선 마우스를 한 번 흔들어 깨운 뒤 미세요(키보드는 아무 키나 한 번)."
+                    : "켜기가 취소되었거나 실패했습니다.\r\n관리자 권한(UAC)이 필요하며, 회사 관리 PC 정책이 막을 수 있습니다.",
                     "LogiFlow", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
             else
             {
-                if (_preLogonInstalled || PreLogon.IsInstalled())
+                bool had = _preLogonInstalled || PreLogon.IsInstalled();
+                bool okMsg = true;
+                if (had)
                 {
-                    bool ok = PreLogon.RequestDisable();
-                    LogonEdges.Remove();
-                    MessageBox.Show(this, ok ? "로그온 전 실행을 제거했습니다." : "제거가 취소되었거나 실패했습니다(관리자 권한 필요).",
-                        "LogiFlow", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                    var modal = new ProgressModal("로그온 전에도 실행 — 끄는 중");
+                    var hOff = modal.Handle; GC.KeepAlive(hOff);
+                    var tOff = new System.Threading.Thread(() =>
+                    {
+                        try
+                        {
+                            modal.SetStep("관리자 권한 요청 → 서비스 제거 중…\r\nUAC 창이 뜨면 '예'를 눌러 주세요.");
+                            okMsg = PreLogon.RequestDisable();
+                            LogonEdges.Remove();
+                        }
+                        catch { }
+                        finally { modal.Done(); }
+                    });
+                    try { tOff.SetApartmentState(System.Threading.ApartmentState.STA); } catch { }
+                    tOff.IsBackground = true; tOff.Start();
+                    modal.ShowDialog(this);
+                    modal.Dispose();
                 }
-                // 삭제 성공 여부를 낙관하지 말고 실제 작업 상태를 재조회해 반영(UAC 취소/실패로 작업이
-                // 남았는데 토글만 꺼져 보이고 재시작하면 다시 켜져 보이던 버그 방지).
+                // 삭제 성공 여부를 낙관하지 말고 실제 서비스 상태를 재조회해 반영.
                 bool stillInstalled = PreLogon.IsInstalled();
                 _preLogonInstalled = stillInstalled;
                 Config.PreLogon = stillInstalled;
                 _tray.ApplyConfig();
+                if (had)
+                    MessageBox.Show(this, (okMsg && !stillInstalled) ? "로그온 전에도 실행을 껐습니다." : "제거가 취소되었거나 실패했습니다(관리자 권한 필요).",
+                        "LogiFlow", MessageBoxButtons.OK, (okMsg && !stillInstalled) ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
             BeginInvoke((Action)(() => ShowPage(1)));
         }

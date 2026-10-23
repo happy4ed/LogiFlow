@@ -39,4 +39,128 @@ namespace LogiFlow.Ui
             }
         }
     }
+
+    /// <summary>
+    /// 오래 걸리는 동작용 모달 — 단계 메시지 + 진행 막대. 완료 시 자동으로 닫힌다. 모달이라 그동안 다른
+    /// 조작을 막아, 처리 중에 눌러도 반응 없어 버그처럼 보이던 것을 방지한다.
+    /// 백그라운드 스레드에서 SetStep/Done 을 호출하고(Invoke 안전), 메인 스레드는 ShowDialog 로 대기한다.
+    /// </summary>
+    public sealed class ProgressModal : Form
+    {
+        private readonly Label _step;
+
+        public ProgressModal(string title)
+        {
+            Text = title;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.CenterParent;
+            ControlBox = false;
+            MinimizeBox = false;
+            MaximizeBox = false;
+            ShowInTaskbar = false;
+            ClientSize = new Size(400, 132);
+            BackColor = Theme.Content;
+            ForeColor = Theme.Ink;
+
+            var head = new Label { Text = title, Left = 20, Top = 18, Width = 360, Height = 24, AutoSize = false, Font = UiFont.Get(10.5f, FontStyle.Bold), ForeColor = Theme.Ink };
+            _step = new Label { Text = "준비 중…", Left = 20, Top = 48, Width = 360, Height = 46, AutoSize = false, Font = UiFont.Get(9f), ForeColor = Theme.Muted };
+            var bar = new ProgressBar { Left = 20, Top = 102, Width = 360, Height = 10, Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 30 };
+            Controls.Add(head);
+            Controls.Add(_step);
+            Controls.Add(bar);
+        }
+
+        public void SetStep(string s)
+        {
+            try
+            {
+                if (!IsHandleCreated) return;
+                BeginInvoke((Action)(() => { try { _step.Text = s; } catch { } }));
+            }
+            catch { }
+        }
+
+        public void Done()
+        {
+            try
+            {
+                if (!IsHandleCreated) return;
+                BeginInvoke((Action)(() => { try { Close(); } catch { } }));
+            }
+            catch { }
+        }
+    }
+
+    /// <summary>오픈소스 라이선스(MIT) 보기 — 읽기 전용 스크롤 텍스트 모달.</summary>
+    public static class LicenseDialog
+    {
+        private const string Body =
+            "LogiFlow\r\n" +
+            "로지텍 Easy-Switch 모니터 가장자리 자동 전환\r\n\r\n" +
+            "MIT License\r\n\r\n" +
+            "Copyright (c) 2026 happy4ed\r\n\r\n" +
+            "Permission is hereby granted, free of charge, to any person obtaining a copy " +
+            "of this software and associated documentation files (the \"Software\"), to deal " +
+            "in the Software without restriction, including without limitation the rights " +
+            "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell " +
+            "copies of the Software, and to permit persons to whom the Software is " +
+            "furnished to do so, subject to the following conditions:\r\n\r\n" +
+            "The above copyright notice and this permission notice shall be included in all " +
+            "copies or substantial portions of the Software.\r\n\r\n" +
+            "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR " +
+            "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, " +
+            "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE " +
+            "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER " +
+            "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, " +
+            "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE " +
+            "SOFTWARE.\r\n\r\n" +
+            "─────────────────────────────\r\n" +
+            "구성 / 사용 기술\r\n" +
+            "• .NET Framework 4.6.2 · WinForms (Microsoft)\r\n" +
+            "• Windows HID / SetupAPI (P/Invoke) — Logitech HID++ 2.0 (feature 0x1814 Change Host)\r\n" +
+            "• 설치 패키지: Inno Setup\r\n";
+
+        public static void Show(IWin32Window owner)
+        {
+            using (var form = new Form())
+            {
+                form.Text = "오픈소스 라이선스";
+                form.FormBorderStyle = FormBorderStyle.Sizable;
+                form.StartPosition = FormStartPosition.CenterParent;
+                form.MinimizeBox = false;
+                form.MaximizeBox = true;
+                form.ClientSize = new Size(560, 460);
+                form.BackColor = Theme.Content;
+                form.ForeColor = Theme.Ink;
+
+                var pad = new Panel { Dock = DockStyle.Fill, Padding = new Padding(16, 16, 16, 8), BackColor = Theme.Content };
+                var box = new TextBox
+                {
+                    Multiline = true,
+                    ReadOnly = true,
+                    ScrollBars = ScrollBars.Vertical,
+                    Dock = DockStyle.Fill,
+                    BorderStyle = BorderStyle.None,
+                    BackColor = Theme.Field,
+                    ForeColor = Theme.Ink,
+                    Font = UiFont.Get(9f),
+                    WordWrap = true,
+                    Text = Body,
+                };
+                pad.Controls.Add(box);
+
+                var btnBar = new Panel { Dock = DockStyle.Bottom, Height = 48, BackColor = Theme.Content };
+                var close = new ThemedButton { Text = "닫기", Width = 88, Height = 28, Top = 10, Anchor = AnchorStyles.Right | AnchorStyles.Top };
+                close.Left = form.ClientSize.Width - 104;
+                close.Click += (s, e) => form.Close();
+                btnBar.Controls.Add(close);
+
+                form.Controls.Add(pad);
+                form.Controls.Add(btnBar);
+                form.AcceptButton = close;
+                try { box.Select(0, 0); } catch { }
+                form.ShowDialog(owner);
+            }
+        }
+    }
 }
