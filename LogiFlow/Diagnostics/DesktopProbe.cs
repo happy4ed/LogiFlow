@@ -377,25 +377,14 @@ namespace LogiFlow.Diagnostics
         /// <summary>winlogon 데스크톱에서 호출 — 보안 화면(잠금/로그온)일 때만 엣지 감지→setHost. 무한 실행.</summary>
         public static void RunLogonSwitch()
         {
-            // 단일 인스턴스 — 중복 워커가 HID 를 서로 물면 setHost 가 0개로 실패한다(실측). 하나만 돈다.
-            bool createdNew = false;
-            Mutex mutex = null;
-            try { mutex = new Mutex(true, "Global\\LogiFlow-LogonSwitch-Worker-7A2", out createdNew); }
-            catch { createdNew = true; }
-            if (!createdNew)
-            {
-                Append("logon-switch 워커가 이미 실행 중 — 중복 인스턴스 종료(HID 충돌 방지).");
-                return;
-            }
-            try
-            {
-                var worker = new Thread(LogonSwitchLoop);
-                try { worker.SetApartmentState(ApartmentState.MTA); } catch { }
-                worker.IsBackground = false;
-                worker.Start();
-                worker.Join();
-            }
-            finally { try { if (mutex != null) mutex.ReleaseMutex(); } catch { } GC.KeepAlive(mutex); }
+            // 단일 인스턴스는 서비스(supervisor)가 보장한다 — 교체 전 기존 워커를 KillProcess 로 종료한다.
+            // 워커 자체는 뮤텍스로 자진 종료하지 않는다: 과거 Global 뮤텍스 방식은 서비스의 재투입과 충돌해
+            // 스폰→충돌→즉시종료→재스폰(2초 churn)을 유발했다. 대신 세션 이탈 시 워커가 스스로 종료한다.
+            var worker = new Thread(LogonSwitchLoop);
+            try { worker.SetApartmentState(ApartmentState.MTA); } catch { }
+            worker.IsBackground = false;
+            worker.Start();
+            worker.Join();
         }
 
         private static void LogonSwitchLoop()
@@ -490,10 +479,29 @@ namespace LogiFlow.Diagnostics
             int lastX = 0, lastY = 0; bool haveLast = false;
             long lastSwitch = 0, lastDebug = 0, lastConfigRead = 0;
             string lastName = null;
+            // 내 세션(이 워커가 투입된 콘솔 세션). 콘솔이 다른 세션으로 옮겨가면(로그오프·사용자전환)
+            // 이 워커는 무효 → 자진 종료(서비스가 새 세션에 재투입). 뮤텍스 없이 중복 워커를 막는 수단.
+            int mySession = -1;
+            try { mySession = System.Diagnostics.Process.GetCurrentProcess().SessionId; } catch { }
+            long sessionGoneSince = 0;
 
             while (true)
             {
                 Thread.Sleep(50);
+
+                if (mySession >= 0)
+                {
+                    uint ac = WTSGetActiveConsoleSessionId();
+                    if (ac != 0xFFFFFFFF && (int)ac != mySession)
+                    {
+                        long tnow = Environment.TickCount;
+                        if (sessionGoneSince == 0) sessionGoneSince = tnow;
+                        else if (tnow - sessionGoneSince > 3000)
+                        { Append("콘솔 세션 이탈(내 세션 " + mySession + " → 활성 " + ac + ") — 워커 종료"); return; }
+                    }
+                    else sessionGoneSince = 0;
+                }
+
                 IntPtr hIn = OpenInputDesktop(0, false, DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS);
                 if (hIn == IntPtr.Zero) { haveLast = false; continue; }
                 string name = DesktopName(hIn);
