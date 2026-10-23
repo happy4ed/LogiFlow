@@ -58,6 +58,7 @@
     <Compile Include="Config\LogonEdges.cs" />
     <Compile Include="Handoff\HandoffPrimitives.cs" />
     <Compile Include="Handoff\EdgeDetector.cs" />
+    <Compile Include="Diagnostics\DesktopSwitchWorker.cs" />
     <Compile Include="Handoff\EdgeWatcher.cs" />
     <Compile Include="Native\NativeMethods.cs" />
     <Compile Include="Hid\HidInterfaceInfo.cs" />

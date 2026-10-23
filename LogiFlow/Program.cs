@@ -59,6 +59,12 @@ namespace LogiFlow
                     DesktopProbe.RunLauncher("--logon-switch");
                     return;
                 }
+                // B안(LogiFlow+): 바탕화면(Default) 데스크탑 raw 엣지 전환 워커. 서비스가 winsta0\default 에 스폰.
+                if (a0.StartsWith("--desktop-switch", StringComparison.OrdinalIgnoreCase))
+                {
+                    DesktopSwitchWorker.Run();
+                    return;
+                }
                 if (a0.StartsWith("--logon-switch", StringComparison.OrdinalIgnoreCase))
                 {
                     DesktopProbe.RunLogonSwitch();
