@@ -6,6 +6,8 @@ hidraw 전송·열거(`src/HidStream.cs`, `src/HidEnumerator.cs`)와 CLI(`src/Pr
 
 ## 설치
 
+받기: GitHub 릴리스 `linux-v<버전>` 의 `LogiFlow-linux-v<버전>-x64.tar.gz`(arm 이면 arm64).
+
 ```sh
 tar xzf LogiFlow-linux-v0.1.0-x64.tar.gz
 cd LogiFlow-linux-v0.1.0-x64
