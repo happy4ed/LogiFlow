@@ -326,7 +326,20 @@ namespace LogiFlow.Diagnostics
         /// 세션0 SYSTEM(서비스)에서 호출 — 활성 콘솔 세션의 winlogon 데스크톱에 '--logon-switch' 워커를 띄우고
         /// 그 프로세스 핸들을 돌려준다(서비스가 세션 전환 시 KillProcess 로 교체). 실패 시 false.
         /// </summary>
+        // 로그온/잠금 화면 전담(폴링, winsta0\winlogon). 바탕화면이면 워커가 스스로 OFF.
         public static bool SpawnLogonWorker(out IntPtr hProcessOut, out uint pidOut, out uint sessionOut)
+        {
+            return SpawnWorker("--logon-switch", "winsta0\\winlogon", out hProcessOut, out pidOut, out sessionOut);
+        }
+
+        // B안: 바탕화면(Default) 전담(raw input, winsta0\default). 입력 데스크톱이 default 일 때만 동작.
+        public static bool SpawnDesktopWorker(out IntPtr hProcessOut, out uint pidOut, out uint sessionOut)
+        {
+            return SpawnWorker("--desktop-switch", "winsta0\\default", out hProcessOut, out pidOut, out sessionOut);
+        }
+
+        /// <summary>활성 콘솔 세션의 지정 데스크톱에 winlogon(SYSTEM) 토큰으로 워커를 투입한다.</summary>
+        public static bool SpawnWorker(string childArg, string desktop, out IntPtr hProcessOut, out uint pidOut, out uint sessionOut)
         {
             hProcessOut = IntPtr.Zero; pidOut = 0; sessionOut = 0xFFFFFFFF;
             IntPtr hProc = IntPtr.Zero, hTok = IntPtr.Zero, hDup = IntPtr.Zero;
@@ -346,17 +359,17 @@ namespace LogiFlow.Diagnostics
 
                 var si = new STARTUPINFO();
                 si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
-                si.lpDesktop = "winsta0\\winlogon";
+                si.lpDesktop = desktop;
                 PROCESS_INFORMATION pi;
-                string cmd = "\"" + Application.ExecutablePath + "\" --logon-switch";
+                string cmd = "\"" + Application.ExecutablePath + "\" " + childArg;
                 bool ok = CreateProcessAsUser(hDup, null, cmd, IntPtr.Zero, IntPtr.Zero, false, CREATE_NO_WINDOW, IntPtr.Zero, null, ref si, out pi);
-                if (!ok) { ServiceLog("CreateProcessAsUser 실패 err=" + Marshal.GetLastWin32Error()); return false; }
+                if (!ok) { ServiceLog("CreateProcessAsUser(" + desktop + ") 실패 err=" + Marshal.GetLastWin32Error()); return false; }
 
                 CloseHandle(pi.hThread);
                 hProcessOut = pi.hProcess;   // 서비스가 소유(교체 시 KillProcess)
                 pidOut = pi.dwProcessId;
                 sessionOut = consoleSession;
-                ServiceLog("워커 투입 pid=" + pi.dwProcessId + " 세션=" + consoleSession);
+                ServiceLog("워커 투입 " + childArg + " (" + desktop + ") pid=" + pi.dwProcessId + " 세션=" + consoleSession);
                 return true;
             }
             catch (Exception ex) { ServiceLog("워커 투입 오류: " + ex.Message); return false; }

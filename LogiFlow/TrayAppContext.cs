@@ -253,7 +253,10 @@ namespace LogiFlow
         {
             _watcher.Stop();
             _watcher.Configure(Config);
-            if (Config.EdgeSwitchEnabled && _watcher.HasAttachments && Switchable().Count > 0)
+            // B안: '로그온 전에도 실행'(서비스)이 켜지면 바탕화면 전환은 서비스 raw 워커가 전담한다.
+            // 트레이가 같이 감시하면 중복 전환이 되므로, 서비스 설치 시 트레이 엣지 감시는 끈다
+            // (트레이는 설정·수동 전환·glow UI 전용). 서비스 미설치 사용자는 기존대로 트레이가 감시.
+            if (!Config.PreLogon && Config.EdgeSwitchEnabled && _watcher.HasAttachments && Switchable().Count > 0)
             {
                 _watcher.Start();
             }

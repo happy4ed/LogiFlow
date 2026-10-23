@@ -19,8 +19,10 @@ namespace LogiFlow.Service
 
         private Thread _sup;
         private volatile bool _stop;
-        private IntPtr _worker = IntPtr.Zero;
+        private IntPtr _worker = IntPtr.Zero;          // 로그온/잠금 전담(winsta0\winlogon, 폴링)
         private uint _workerSession = 0xFFFFFFFF;
+        private IntPtr _deskWorker = IntPtr.Zero;      // 바탕화면 전담(winsta0\default, raw input)
+        private uint _deskWorkerSession = 0xFFFFFFFF;
 
         public LogonSwitchService()
         {
@@ -45,7 +47,8 @@ namespace LogiFlow.Service
         {
             _stop = true;
             try { if (_sup != null) _sup.Join(3000); } catch { }
-            KillWorker();
+            KillLogonWorker();
+            KillDeskWorker();
         }
 
         private void Supervise()
@@ -58,19 +61,20 @@ namespace LogiFlow.Service
                     uint cur = DesktopProbe.ActiveConsoleSession();
                     if (cur != 0xFFFFFFFF)
                     {
-                        bool need =
-                            _worker == IntPtr.Zero ||
-                            !DesktopProbe.ProcessAlive(_worker) ||
-                            cur != _workerSession;
-                        if (need)
+                        // 세션당 두 워커를 띄운다: winlogon(로그온/잠금) + default(바탕화면).
+                        // 각 워커가 자기 입력 데스크톱일 때만 동작하므로 중복 전환이 없다(바탕화면에선
+                        // 폴링 워커가 스스로 OFF, raw 워커만 동작).
+                        if (_worker == IntPtr.Zero || !DesktopProbe.ProcessAlive(_worker) || cur != _workerSession)
                         {
-                            KillWorker();   // 세션 바뀜/죽음 → 교체
+                            KillLogonWorker();
                             IntPtr h; uint pid, sess;
-                            if (DesktopProbe.SpawnLogonWorker(out h, out pid, out sess))
-                            {
-                                _worker = h;
-                                _workerSession = sess;
-                            }
+                            if (DesktopProbe.SpawnLogonWorker(out h, out pid, out sess)) { _worker = h; _workerSession = sess; }
+                        }
+                        if (_deskWorker == IntPtr.Zero || !DesktopProbe.ProcessAlive(_deskWorker) || cur != _deskWorkerSession)
+                        {
+                            KillDeskWorker();
+                            IntPtr h; uint pid, sess;
+                            if (DesktopProbe.SpawnDesktopWorker(out h, out pid, out sess)) { _deskWorker = h; _deskWorkerSession = sess; }
                         }
                     }
                 }
@@ -79,17 +83,28 @@ namespace LogiFlow.Service
                 // ~2초 대기(중단 시 빠르게 반응).
                 for (int i = 0; i < 20 && !_stop; i++) Thread.Sleep(100);
             }
-            KillWorker();
+            KillLogonWorker();
+            KillDeskWorker();
             DesktopProbe.ServiceLog("supervisor 종료");
         }
 
-        private void KillWorker()
+        private void KillLogonWorker()
         {
             if (_worker != IntPtr.Zero)
             {
                 DesktopProbe.KillProcess(_worker);
                 _worker = IntPtr.Zero;
                 _workerSession = 0xFFFFFFFF;
+            }
+        }
+
+        private void KillDeskWorker()
+        {
+            if (_deskWorker != IntPtr.Zero)
+            {
+                DesktopProbe.KillProcess(_deskWorker);
+                _deskWorker = IntPtr.Zero;
+                _deskWorkerSession = 0xFFFFFFFF;
             }
         }
     }
