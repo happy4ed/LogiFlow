@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    LogiFlow 리눅스 CLI. HID++ 프로토콜·전환·스캔은 윈도우판 소스를 그대로 링크해 쓰고
+    (LogiFlow/Hidpp · Diagnostics), 리눅스 전용은 hidraw 전송·열거와 CLI 뿐이다.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>logiflow</AssemblyName>
+    <RootNamespace>LogiFlow</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <DebugType>none</DebugType>
+    <DefineConstants>$(DefineConstants);LOGIFLOW_LINUX</DefineConstants>
+    <NoWarn>$(NoWarn);CS0168;CS0219</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../LogiFlow/Hidpp/HidppDevice.cs" Link="Shared/HidppDevice.cs" />
+    <Compile Include="../LogiFlow/Hidpp/HidppError.cs" Link="Shared/HidppError.cs" />
+    <Compile Include="../LogiFlow/Hid/HidInterfaceInfo.cs" Link="Shared/HidInterfaceInfo.cs" />
+    <Compile Include="../LogiFlow/Diagnostics/DeviceScanner.cs" Link="Shared/DeviceScanner.cs" />
+    <Compile Include="../LogiFlow/Diagnostics/ScanResult.cs" Link="Shared/ScanResult.cs" />
+    <Compile Include="../LogiFlow/Diagnostics/DiagLogger.cs" Link="Shared/DiagLogger.cs" />
+    <Compile Include="../LogiFlow/Diagnostics/HostSwitcher.cs" Link="Shared/HostSwitcher.cs" />
+  </ItemGroup>
+
+</Project>

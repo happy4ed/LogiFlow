@@ -153,7 +153,7 @@ namespace LogiFlow.Diagnostics
             {
                 var hidpp = new HidppDevice(stream, _log);
 
-                foreach (byte deviceIndex in DeviceIndexCandidates)
+                foreach (byte deviceIndex in iface.DeviceIndexHint ?? DeviceIndexCandidates)
                 {
                     bool present;
                     try

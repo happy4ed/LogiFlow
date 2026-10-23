@@ -1,0 +1,103 @@
+name: Linux build and release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/linux-release.yml'
+      - 'linux/**'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified Linux release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < linux/VERSION)"
+          if [[ ! "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then echo "Invalid version"; exit 1; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Publish x64 and arm64
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for RID in linux-x64 linux-arm64; do
+            dotnet publish linux/LogiFlow.Linux.csproj -c Release -r "$RID" -p:Version="$VERSION" -o "out/$RID"
+          done
+      - name: Self-test (x64)
+        run: |
+          set -euo pipefail
+          ./out/linux-x64/logiflow --version
+          ./out/linux-x64/logiflow selftest
+          ./out/linux-x64/logiflow --help
+          # 장치 없는 러너: 안내 후 종료코드 1 이 정상.
+          set +e; ./out/linux-x64/logiflow list; echo "list exit=$?"
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for ARCH in x64 arm64; do
+            NAME="LogiFlow-linux-v${VERSION}-${ARCH}"
+            mkdir -p "stage/$NAME"
+            cp "out/linux-$ARCH/logiflow" "stage/$NAME/"
+            cp linux/dist-files/* linux/README.md "stage/$NAME/"
+            chmod +x "stage/$NAME/logiflow" "stage/$NAME/"*.sh
+            tar -C stage -czf "dist/$NAME.tar.gz" "$NAME"
+          done
+          (cd dist && sha256sum *.tar.gz > "LogiFlow-linux-v${VERSION}-SHA256SUMS.txt")
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LogiFlow-linux-${{ steps.version.outputs.version }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: build
+    if: (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:')) || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: LogiFlow-linux-${{ needs.build.outputs.version }}
+          path: release-assets
+      - name: Verify and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          (cd release-assets && sha256sum --check "LogiFlow-linux-v${VERSION}-SHA256SUMS.txt")
+          gh release create "linux-v${VERSION}" release-assets/* \
+            --target "$COMMIT_SHA" --title "LogiFlow Linux ${VERSION}" \
+            --notes-file linux/docs/RELEASE_NOTES_linux_v0.1.0.md --prerelease

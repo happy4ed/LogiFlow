@@ -12,6 +12,7 @@ namespace LogiFlow.Hid
         public int OutputReportByteLength;
         public string ProductString;
         public bool CapsRead;   // caps/attrs 를 실제로 읽었는지(false면 경로에서만 추출)
+        public byte[] DeviceIndexHint;  // 핑할 deviceIndex 만 알 때(리눅스 hidraw). null 이면 0xFF+1~6 전부
 
         public string VidPid
         {
