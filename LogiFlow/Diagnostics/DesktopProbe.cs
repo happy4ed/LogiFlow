@@ -348,6 +348,40 @@ namespace LogiFlow.Diagnostics
             catch (Exception ex) { Append("기기 스캔 오류: " + ex.Message); }
             Append(string.Format("엣지 {0}개 · 전환가능 기기 {1}개 · dwell={2}ms", cfgEdges.Count, switchable.Count, dwellMs));
 
+            // 콜드부팅 로그인 전엔 로지텍 기기가 자고 있어 스캔이 0~1개로 흔들린다(로그인 후 2개).
+            // 전환 순간에 느린 재스캔(≈9초)을 하면 지연·누락이 생기므로, 백그라운드로 주기 스캔해
+            // '깨어난 기기'를 미리 목록에 채워 둔다. 전송은 이 최신 목록에서 '즉시' 나간다.
+            var scanLock = new object();
+            var sharedBox = new List<ScanResult>[] { switchable };   // 최신 전환가능 목록
+            var activeBox = new bool[] { false };                     // 로그온/잠금 화면일 때만 스캔
+            var scanner = new Thread(() =>
+            {
+                long last = 0;
+                while (true)
+                {
+                    Thread.Sleep(200);
+                    bool act; lock (scanLock) act = activeBox[0];
+                    if (!act) continue;   // 사용자 바탕화면에선 스캔 안 함(트레이 앱과 HID 경합 방지)
+                    int have; lock (scanLock) have = sharedBox[0].Count;
+                    long t = Environment.TickCount;
+                    // 기기가 있으면 5초마다 갱신, 없으면 1.5초마다 재탐색(깨어나길 계속 찾는다).
+                    if (have > 0 ? (t - last < 5000) : (t - last < 1500)) continue;
+                    last = t;
+                    try
+                    {
+                        var rr = new DeviceScanner(new DiagLogger(AppDomain.CurrentDomain.BaseDirectory) { Enabled = false }).Scan();
+                        var list = new List<ScanResult>();
+                        foreach (var r in rr) if (r.ChangeHostSupported && r.HostCount > 0) list.Add(r);
+                        if (list.Count > 0) { lock (scanLock) sharedBox[0] = list; }   // 0이면 직전 목록 유지(일시적 누락 무시)
+                    }
+                    catch { }
+                }
+            });
+            try { scanner.SetApartmentState(ApartmentState.MTA); } catch { }
+            scanner.IsBackground = true;
+            scanner.Start();
+            int lastLoggedCount = switchable.Count;
+
             Screen[] scr = Screen.AllScreens;
             if (debug)
             {
@@ -396,6 +430,7 @@ namespace LogiFlow.Diagnostics
                 bool locked = LogonEdges.IsLocked();
                 // 전환 감지 ON 조건: 보안 데스크톱(로그온 화면) 또는 세션 잠김(ARM 은 잠금 때도 Default 로 보임).
                 bool active = secure || locked;
+                lock (scanLock) activeBox[0] = active;   // 백그라운드 스캐너 on/off
                 POINT p = new POINT(); bool got = false;
                 // active 또는 디버그면 커서를 읽는다(일반 상태 디버그 로깅 포함).
                 if (active || debug)
@@ -418,6 +453,13 @@ namespace LogiFlow.Diagnostics
                 {
                     Append("입력 데스크톱=" + name + " · 잠김=" + (locked ? "Y" : "N") + (active ? " → 전환 감지 ON" : " → OFF(사용자 세션 담당)"));
                     lastName = name;
+                }
+                // 백그라운드 스캔으로 전환가능 기기 수가 바뀌면 알린다(기기가 깨어나는 과정 가시화).
+                int curCount; lock (scanLock) curCount = sharedBox[0].Count;
+                if (curCount != lastLoggedCount)
+                {
+                    Append("전환가능 기기 " + lastLoggedCount + "개 → " + curCount + "개 (백그라운드 스캔)");
+                    lastLoggedCount = curCount;
                 }
 
                 if (debug && got && now - lastDebug > 400)
@@ -447,18 +489,11 @@ namespace LogiFlow.Diagnostics
                     if (d.Det.Feed(d.Rect, d.Edge, p.X, p.Y, push, now, false, false))
                     {
                         Append(string.Format("[로그온 전환] {0} → 채널 {1} · cursor=({2},{3})", d.Label, d.Channel + 1, p.X, p.Y));
-                        // 시작 스캔이 HID 경합으로 비었을 수 있다 → 전송 직전 비어 있으면 1회 즉석 재스캔.
-                        if (switchable.Count == 0)
-                        {
-                            try
-                            {
-                                var rr = new DeviceScanner(new DiagLogger(AppDomain.CurrentDomain.BaseDirectory) { Enabled = false }).Scan();
-                                foreach (var r in rr) if (r.ChangeHostSupported && r.HostCount > 0) switchable.Add(r);
-                                Append("  (재스캔) 전환가능 기기 " + switchable.Count + "개");
-                            }
-                            catch (Exception ex) { Append("  재스캔 오류: " + ex.Message); }
-                        }
-                        try { int sent = HostSwitcher.SwitchAll(switchable, d.Channel, hlog); Append("  setHost 전송 " + sent + "개"); }
+                        // 백그라운드 스캐너가 유지하는 최신 목록에서 즉시 전송(느린 인라인 재스캔 제거 — 9초 지연 없음).
+                        List<ScanResult> sw; lock (scanLock) sw = sharedBox[0];
+                        if (sw.Count == 0)
+                            Append("  전환가능 기기 0개 — 마우스·키보드가 아직 자고 있음(한 번 움직여/눌러 깨우면 다음 밀기에 전환).");
+                        try { int sent = HostSwitcher.SwitchAll(sw, d.Channel, hlog); Append("  setHost 전송 " + sent + "개"); }
                         catch (Exception ex) { Append("  setHost 오류: " + ex.Message); }
                         lastSwitch = now;
                         foreach (var o in dets) o.Det.Reset(true);
