@@ -193,6 +193,8 @@ namespace LogiFlow.Diagnostics
         [DllImport("kernel32.dll")] private static extern uint WTSGetActiveConsoleSessionId();
         [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
         [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr h);
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern bool TerminateProcess(IntPtr h, uint exitCode);
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern uint WaitForSingleObject(IntPtr h, uint ms);
         [DllImport("kernel32.dll", SetLastError = true)] private static extern bool ProcessIdToSessionId(uint pid, out uint sessionId);
         [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern bool Process32First(IntPtr snap, ref PROCESSENTRY32 pe);
@@ -295,6 +297,75 @@ namespace LogiFlow.Diagnostics
                 Append("런처 오류: " + ex);
             }
             Append("세션0 런처 종료.");
+        }
+
+        // ===== 윈도우 서비스(LogonSwitchService)용 공개 헬퍼 =====
+
+        /// <summary>서비스 supervisor 로그를 워커와 같은 로그 파일(desktop-probe.log)에 남긴다.</summary>
+        public static void ServiceLog(string s) { Append("[서비스] " + s); }
+
+        /// <summary>활성 콘솔(물리 콘솔에 연결된) 세션 id. 0xFFFFFFFF 면 미연결.</summary>
+        public static uint ActiveConsoleSession() { return WTSGetActiveConsoleSessionId(); }
+
+        /// <summary>CreateProcessAsUser 로 받은 프로세스 핸들이 아직 살아 있나.</summary>
+        public static bool ProcessAlive(IntPtr hProcess)
+        {
+            if (hProcess == IntPtr.Zero) return false;
+            return WaitForSingleObject(hProcess, 0) == 0x00000102; // WAIT_TIMEOUT = 아직 실행 중
+        }
+
+        /// <summary>프로세스 강제 종료(PID 패턴 매칭 없이 핸들로만) + 핸들 닫기.</summary>
+        public static void KillProcess(IntPtr hProcess)
+        {
+            if (hProcess == IntPtr.Zero) return;
+            try { TerminateProcess(hProcess, 0); } catch { }
+            try { CloseHandle(hProcess); } catch { }
+        }
+
+        /// <summary>
+        /// 세션0 SYSTEM(서비스)에서 호출 — 활성 콘솔 세션의 winlogon 데스크톱에 '--logon-switch' 워커를 띄우고
+        /// 그 프로세스 핸들을 돌려준다(서비스가 세션 전환 시 KillProcess 로 교체). 실패 시 false.
+        /// </summary>
+        public static bool SpawnLogonWorker(out IntPtr hProcessOut, out uint pidOut, out uint sessionOut)
+        {
+            hProcessOut = IntPtr.Zero; pidOut = 0; sessionOut = 0xFFFFFFFF;
+            IntPtr hProc = IntPtr.Zero, hTok = IntPtr.Zero, hDup = IntPtr.Zero;
+            try
+            {
+                uint consoleSession = WTSGetActiveConsoleSessionId();
+                if (consoleSession == 0xFFFFFFFF) { ServiceLog("활성 콘솔 세션 없음 — 대기"); return false; }
+                uint pid = FindProcessInSession("winlogon.exe", consoleSession);
+                if (pid == 0) { ServiceLog("winlogon(세션 " + consoleSession + ") 못 찾음 — 대기"); return false; }
+
+                hProc = OpenProcess(PROCESS_QUERY_INFORMATION, false, pid);
+                if (hProc == IntPtr.Zero) { ServiceLog("OpenProcess(winlogon) 실패 err=" + Marshal.GetLastWin32Error()); return false; }
+                if (!OpenProcessToken(hProc, TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, out hTok))
+                { ServiceLog("OpenProcessToken 실패 err=" + Marshal.GetLastWin32Error()); return false; }
+                if (!DuplicateTokenEx(hTok, MAXIMUM_ALLOWED, IntPtr.Zero, SecurityImpersonation, TokenPrimary, out hDup))
+                { ServiceLog("DuplicateTokenEx 실패 err=" + Marshal.GetLastWin32Error()); return false; }
+
+                var si = new STARTUPINFO();
+                si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+                si.lpDesktop = "winsta0\\winlogon";
+                PROCESS_INFORMATION pi;
+                string cmd = "\"" + Application.ExecutablePath + "\" --logon-switch";
+                bool ok = CreateProcessAsUser(hDup, null, cmd, IntPtr.Zero, IntPtr.Zero, false, CREATE_NO_WINDOW, IntPtr.Zero, null, ref si, out pi);
+                if (!ok) { ServiceLog("CreateProcessAsUser 실패 err=" + Marshal.GetLastWin32Error()); return false; }
+
+                CloseHandle(pi.hThread);
+                hProcessOut = pi.hProcess;   // 서비스가 소유(교체 시 KillProcess)
+                pidOut = pi.dwProcessId;
+                sessionOut = consoleSession;
+                ServiceLog("워커 투입 pid=" + pi.dwProcessId + " 세션=" + consoleSession);
+                return true;
+            }
+            catch (Exception ex) { ServiceLog("워커 투입 오류: " + ex.Message); return false; }
+            finally
+            {
+                if (hDup != IntPtr.Zero) CloseHandle(hDup);
+                if (hTok != IntPtr.Zero) CloseHandle(hTok);
+                if (hProc != IntPtr.Zero) CloseHandle(hProc);
+            }
         }
 
         // ===== 로그온/잠금 화면 전환 워커 (winlogon 데스크톱 · SYSTEM · 실제 전환) =====

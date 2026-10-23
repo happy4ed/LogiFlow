@@ -23,29 +23,11 @@ namespace LogiFlow.Config
     {
         public const string TaskName = "LogiFlow-PreLogon";
 
-        /// <summary>예약 작업 존재 여부(schtasks /Query 종료코드 0).</summary>
+        /// <summary>'로그온 전에도 실행' 설치 여부 = 윈도우 서비스(LogiFlowLogonSwitch) 존재 여부.
+        /// (표준 사용자 권한으로 확인 — 토글 상태 표시용.)</summary>
         public static bool IsInstalled()
         {
-            try
-            {
-                // 출력 리디렉션 필수 — 콘솔 없는 앱에서 리디렉션 안 하면 schtasks 가 출력 핸들이 없어
-                // 비정상 종료코드를 낼 수 있다(x86 토글 꺼짐 원인). 출력은 작아서 데드락 없음.
-                var psi = new ProcessStartInfo("schtasks.exe", "/Query /TN \"" + TaskName + "\"")
-                {
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                };
-                using (var p = Process.Start(psi))
-                {
-                    if (p == null) return false;
-                    p.StandardOutput.ReadToEnd();
-                    p.StandardError.ReadToEnd();
-                    if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return false; }
-                    return p.ExitCode == 0;
-                }
-            }
+            try { return LogiFlow.Service.ServiceControl.Exists(); }
             catch { return false; }
         }
 
@@ -92,35 +74,15 @@ namespace LogiFlow.Config
         public static int DoInstall(int myHost)
         {
             // 중요: 로그인 전(로그온 화면)엔 사용자 %LocalAppData% 가 안 올라와 SYSTEM 이 그 경로 exe 를
-            // 못 찾는다 → exe·의존 파일을 머신 공용 ProgramData 로 복사해 거기서 실행한다.
+            // 못 찾는다 → exe·의존 파일을 머신 공용 ProgramData 로 복사해 거기서 실행(서비스 binPath 가 이 경로).
             string exe = CopyWorkerToMachine();
-            // 트리거 2중(부팅 + 로그온). 부팅 ONSTART 는 환경(빠른 시작 등)에 따라 안 뜰 수 있어,
-            // '로그인하면 무조건 뜨는' 로그온 트리거를 함께 건다(단일 인스턴스 뮤텍스가 중복 차단).
-            // plain schtasks /SC 는 트리거 1개만 되므로 XML 로 생성한다.
-            int rc = 1;
-            try
-            {
-                string xml = BuildTaskXml(exe);
-                string xmlPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "LogiFlow", "task.xml");
-                Directory.CreateDirectory(Path.GetDirectoryName(xmlPath));
-                // schtasks /XML 은 UTF-16 LE(BOM) 를 요구한다. /RL 은 XML Principal 과 충돌할 수 있어 뺀다.
-                File.WriteAllText(xmlPath, xml, new System.Text.UnicodeEncoding(false, true));
-                rc = RunSchtasks("/Create /TN \"" + TaskName + "\" /XML \"" + xmlPath + "\" /RU SYSTEM /F");
-                LogLine("작업 생성(XML · 부팅+로그온 · 배터리 조건 제거) rc=" + rc);
-            }
-            catch (Exception ex) { LogLine("XML 작업 생성 예외: " + ex.Message); }
 
-            if (rc != 0)
-            {
-                // 폴백: 종전 방식(부팅 트리거만 · 배터리 조건 남음)으로라도 설치해 토글이 실패하지 않게.
-                // XML 이 거부된 이유는 위 로그의 schtasks 출력으로 확인한다.
-                string inner = "\\\"" + exe + "\\\" --logon-switch-launch";
-                rc = RunSchtasks("/Create /TN \"" + TaskName + "\" /TR \"" + inner + "\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F");
-                LogLine("작업 생성(폴백 ONSTART) rc=" + rc);
-            }
-            // 재부팅·재로그인 없이 지금 바로 실행(즉시 피드백).
-            if (rc == 0) RunSchtasks("/Run /TN \"" + TaskName + "\"");
+            // 구버전 스케줄 작업이 남아 있으면 제거(서비스로 일원화 — 이중 투입 방지).
+            try { RunSchtasks("/Delete /TN \"" + TaskName + "\" /F"); } catch { }
+
+            // 윈도우 서비스 설치(LocalSystem·자동시작) — 콜드부팅 포함 모든 부팅에서 로그인 전 상주.
+            int rc = LogiFlow.Service.ServiceControl.Install(exe);
+            LogLine("서비스 설치(LogiFlowLogonSwitch, 자동시작) rc=" + rc + " exe=" + exe);
             return rc;
         }
 
@@ -200,7 +162,11 @@ namespace LogiFlow.Config
 
         public static int DoUninstall()
         {
-            return RunSchtasks("/Delete /TN \"" + TaskName + "\" /F");
+            // 구버전 스케줄 작업도 함께 제거(있으면).
+            try { RunSchtasks("/Delete /TN \"" + TaskName + "\" /F"); } catch { }
+            int rc = LogiFlow.Service.ServiceControl.Uninstall();
+            LogLine("서비스 제거 rc=" + rc);
+            return rc;
         }
 
         private static int RunSchtasks(string args)

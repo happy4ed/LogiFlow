@@ -136,9 +136,20 @@ namespace LogiFlow
             status.Controls.Add(dot);
             status.Controls.Add(slabel);
 
+            // 좌하단 버전명(맨 아래 고정) — 지금 실행 중인 판을 확인할 수 있게.
+            var verPanel = new Panel { Dock = DockStyle.Bottom, Height = 20, BackColor = sb };
+            var ver = new Label
+            {
+                Text = "v" + Application.ProductVersion,
+                Left = 8, Top = 3, AutoSize = true,
+                ForeColor = Theme.Muted, Font = UiFont.Get(8f)
+            };
+            verPanel.Controls.Add(ver);
+
             _sidebar.Controls.Add(navHost);
             _sidebar.Controls.Add(status);
             _sidebar.Controls.Add(brand);
+            _sidebar.Controls.Add(verPanel);   // 마지막 추가 = 맨 아래 가장자리
 
             UpdateNavActive();
         }

@@ -39,6 +39,7 @@
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.ServiceProcess" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
   </ItemGroup>
@@ -70,6 +71,8 @@
     <Compile Include="Diagnostics\DeviceScanner.cs" />
     <Compile Include="Diagnostics\DeviceCache.cs" />
     <Compile Include="Diagnostics\HostSwitcher.cs" />
+    <Compile Include="Service\LogonSwitchService.cs" />
+    <Compile Include="Service\ServiceControl.cs" />
     <Compile Include="Clipboard\ClipboardSync.cs" />
     <Compile Include="Ui\Theme.cs" />
     <Compile Include="Ui\UiFont.cs" />

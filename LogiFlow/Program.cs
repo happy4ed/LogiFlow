@@ -1,8 +1,10 @@
 using System;
+using System.ServiceProcess;
 using System.Threading;
 using System.Windows.Forms;
 using LogiFlow.Config;
 using LogiFlow.Diagnostics;
+using LogiFlow.Service;
 using LogiFlow.Sharing;
 
 namespace LogiFlow
@@ -18,6 +20,12 @@ namespace LogiFlow
             if (args != null && args.Length > 0)
             {
                 string a0 = args[0];
+                // 윈도우 서비스로 실행(SCM 이 LocalSystem·세션0 에서 호출) — UI·뮤텍스보다 먼저 분기.
+                if (a0.StartsWith("--service", StringComparison.OrdinalIgnoreCase))
+                {
+                    ServiceBase.Run(new LogonSwitchService());
+                    return;
+                }
                 if (a0.StartsWith("--prelogon-pull", StringComparison.OrdinalIgnoreCase))
                 {
                     PreLogonRunner.RunPull(ParseEq(a0, -1));
