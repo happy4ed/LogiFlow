@@ -62,18 +62,30 @@ namespace LogiFlow.Diagnostics
             scanner.Start();
 
             var hlog = new DiagLogger(AppDomain.CurrentDomain.BaseDirectory) { Enabled = true };
+            // setHost(기기당 ping+확인 대기 ~0.5초)는 별도 스레드에서 — UI 스레드가 막히면 glow 가
+            // 마지막 프레임에 멈췄다가 전환이 끝난 뒤에야 갱신된다.
+            int switching = 0;
             Action<int> onTrigger = channel =>
             {
                 List<ScanResult> devs;
                 lock (scanLock) devs = box[0];
                 say(string.Format("[바탕화면 전환] → 채널 {0} · 기기 {1}개", channel + 1, devs.Count));
                 if (devs.Count == 0) { say("  전환가능 기기 0개 — 건너뜀"); return; }
-                try
+                if (Interlocked.CompareExchange(ref switching, 1, 0) != 0) { say("  이전 전환 진행 중 — 건너뜀"); return; }
+                var t = new Thread(() =>
                 {
-                    int ok = HostSwitcher.SwitchAllVerbose(devs, channel, hlog, say, 3);
-                    say("  setHost 전환 " + ok + "/" + devs.Count + "개");
-                }
-                catch (Exception ex) { say("  전환 오류: " + ex.Message); }
+                    try
+                    {
+                        int ok = HostSwitcher.SwitchAllVerbose(devs, channel, hlog, say, 3);
+                        say("  setHost 전환 " + ok + "/" + devs.Count + "개");
+                    }
+                    catch (Exception ex) { say("  전환 오류: " + ex.Message); }
+                    finally { Interlocked.Exchange(ref switching, 0); }
+                })
+                { IsBackground = true };
+                try { t.SetApartmentState(ApartmentState.MTA); }
+                catch { }
+                t.Start();
             };
 
             // glow 오버레이도 이 워커가 바탕화면 데스크탑에 그린다(트레이 감시를 끈 자리 대체).

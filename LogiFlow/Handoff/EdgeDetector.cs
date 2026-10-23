@@ -34,6 +34,9 @@ namespace LogiFlow.Handoff
         public int BandPx { get; set; }
         public int MinPushPx { get; set; }
 
+        /// <summary>전환 직후 변에서 RearmDistance 만큼 떨어지기 전까지 false.</summary>
+        public bool Armed { get { return _armed; } }
+
         public double Progress(long timeMs)
         {
             if (_touchStartMs < 0 || DwellMs <= 0) return 0;

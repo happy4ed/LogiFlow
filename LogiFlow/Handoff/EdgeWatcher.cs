@@ -184,7 +184,7 @@ namespace LogiFlow.Handoff
                     _log.Log(string.Format("엣지 전환 트리거: 모니터 {0} 변 {1} → 채널 {2}",
                         at.MonitorDeviceName, at.Edge, at.Channel + 1));
                     int channel = at.Channel;
-                    // 전환 순간 pop glow.
+                    // 전환 순간: glow 즉시 숨김.
                     ReportGlow(new EdgeGlow { Active = true, Fired = true, Monitor = at.Bounds, Edge = at.Edge, Progress = 1.0, Channel = at.Channel });
                     _lastGlowActive = false;
                     // 다른 변의 dwell 도 리셋(중복 트리거 방지).
@@ -194,8 +194,10 @@ namespace LogiFlow.Handoff
                 }
 
                 // glow: 변의 좁은 띠에 닿아(드래그 아님) progress 가 쌓이는 중인 변을 고른다.
+                // 전환 직후(재무장 전)엔 커서가 변에 남아 있어도 그리지 않는다 — 넘어간 뒤 이 PC 엔
+                // 입력이 더 안 와서, 여기서 켜면 끌 기회 없이 파란 변이 남는다.
                 int dist = EdgeDetector.DistanceFromEdge(at.Bounds, at.Edge, cursor.X, cursor.Y);
-                if (!buttonDown && dist <= EdgeDetector.DefaultBandPx)
+                if (!buttonDown && at.Detector.Armed && dist <= EdgeDetector.DefaultBandPx)
                 {
                     double p = at.Detector.Progress(now);
                     if (glowAt == null || p >= glowProgress)
