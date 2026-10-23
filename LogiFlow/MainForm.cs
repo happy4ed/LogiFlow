@@ -598,6 +598,7 @@ namespace LogiFlow
                     return;
                 }
                 // 설치는 UAC 상승 + 서비스 등록이라 몇 초 걸린다 → 모달로 단계 표시(처리 중 다른 조작 차단).
+                // 끝나면 같은 모달에서 결과 메시지 + [확인] 으로 바뀐다(팝업이 닫힌 뒤 또 팝업 뜨지 않게).
                 bool ok = false;
                 var modal = new ProgressModal("로그온 전에도 실행 — 켜는 중");
                 var hOn = modal.Handle; GC.KeepAlive(hOn);   // 핸들 선생성(백그라운드 Invoke 안전)
@@ -609,10 +610,14 @@ namespace LogiFlow
                         LogonEdges.Write(Config);   // 머신 공유 엣지 설정 먼저 기록
                         modal.SetStep("관리자 권한 요청 → 서비스 등록 중…\r\nUAC 창이 뜨면 '예'를 눌러 주세요.");
                         ok = PreLogon.RequestEnable(Config.MyHost);
-                        modal.SetStep("마무리 중…");
                     }
                     catch { }
-                    finally { modal.Done(); }
+                    finally
+                    {
+                        modal.Finish(ok
+                            ? "로그온 전에도 실행을 켰습니다.\r\n이제 콜드부팅·로그인·잠금 화면에서 가장자리로 밀면 전환됩니다(서비스 상주).\r\n\r\n※ 리시버/동글이 이 PC 에 있어야 하고, 콜드부팅 로그온 화면에선 마우스를 한 번 흔들어 깨운 뒤 미세요(키보드는 아무 키나 한 번)."
+                            : "켜기가 취소되었거나 실패했습니다.\r\n관리자 권한(UAC)이 필요하며, 회사 관리 PC 정책이 막을 수 있습니다.", !ok);
+                    }
                 });
                 try { tOn.SetApartmentState(System.Threading.ApartmentState.STA); } catch { }
                 tOn.IsBackground = true; tOn.Start();
@@ -622,21 +627,18 @@ namespace LogiFlow
                 Config.PreLogon = ok;
                 _preLogonInstalled = ok;   // 설치 성공값 신뢰
                 _tray.ApplyConfig();
-                MessageBox.Show(this, ok
-                    ? "로그온 전에도 실행을 켰습니다.\r\n이제 콜드부팅·로그인·잠금 화면에서 가장자리로 밀면 전환됩니다(서비스 상주).\r\n\r\n※ 리시버/동글이 이 PC 에 있어야 하고, 콜드부팅 로그온 화면에선 마우스를 한 번 흔들어 깨운 뒤 미세요(키보드는 아무 키나 한 번)."
-                    : "켜기가 취소되었거나 실패했습니다.\r\n관리자 권한(UAC)이 필요하며, 회사 관리 PC 정책이 막을 수 있습니다.",
-                    "LogiFlow", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
             else
             {
                 bool had = _preLogonInstalled || PreLogon.IsInstalled();
-                bool okMsg = true;
+                bool stillInstalled = PreLogon.IsInstalled();
                 if (had)
                 {
                     var modal = new ProgressModal("로그온 전에도 실행 — 끄는 중");
                     var hOff = modal.Handle; GC.KeepAlive(hOff);
                     var tOff = new System.Threading.Thread(() =>
                     {
+                        bool okMsg = true;
                         try
                         {
                             modal.SetStep("관리자 권한 요청 → 서비스 제거 중…\r\nUAC 창이 뜨면 '예'를 눌러 주세요.");
@@ -644,21 +646,22 @@ namespace LogiFlow
                             LogonEdges.Remove();
                         }
                         catch { }
-                        finally { modal.Done(); }
+                        finally
+                        {
+                            // 삭제 성공 여부를 낙관하지 말고 실제 서비스 상태를 재조회해 반영.
+                            stillInstalled = PreLogon.IsInstalled();
+                            bool good = okMsg && !stillInstalled;
+                            modal.Finish(good ? "로그온 전에도 실행을 껐습니다." : "제거가 취소되었거나 실패했습니다(관리자 권한 필요).", !good);
+                        }
                     });
                     try { tOff.SetApartmentState(System.Threading.ApartmentState.STA); } catch { }
                     tOff.IsBackground = true; tOff.Start();
                     modal.ShowDialog(this);
                     modal.Dispose();
                 }
-                // 삭제 성공 여부를 낙관하지 말고 실제 서비스 상태를 재조회해 반영.
-                bool stillInstalled = PreLogon.IsInstalled();
                 _preLogonInstalled = stillInstalled;
                 Config.PreLogon = stillInstalled;
                 _tray.ApplyConfig();
-                if (had)
-                    MessageBox.Show(this, (okMsg && !stillInstalled) ? "로그온 전에도 실행을 껐습니다." : "제거가 취소되었거나 실패했습니다(관리자 권한 필요).",
-                        "LogiFlow", MessageBoxButtons.OK, (okMsg && !stillInstalled) ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
             BeginInvoke((Action)(() => ShowPage(1)));
         }
