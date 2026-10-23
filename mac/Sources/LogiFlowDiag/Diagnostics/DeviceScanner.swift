@@ -111,7 +111,10 @@ final class DeviceScanner {
                 continue
             }
 
-            results.append(buildResult(iface: iface, hidpp: hidpp, deviceIndex: deviceIndex))
+            let r = buildResult(iface: iface, hidpp: hidpp, deviceIndex: deviceIndex)
+            r.interface = iface
+            r.device = device
+            results.append(r)
         }
     }
 

@@ -12,9 +12,9 @@ cd "$HERE"
 VERSION="${1:-$(cat VERSION | tr -d '[:space:]')}"
 APP_NAME="LogiFlow"
 EXE_NAME="LogiFlowDiag"
-BUNDLE_ID="com.happy4ed.logiflow.diag"
+BUNDLE_ID="com.happy4ed.logiflow"
 
-echo "== LogiFlow mac 진단 빌드 v${VERSION} =="
+echo "== LogiFlow mac 빌드 v${VERSION} =="
 
 # 1) 릴리스 빌드
 swift build -c release
@@ -40,7 +40,7 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key><string>${APP_NAME}</string>
-  <key>CFBundleDisplayName</key><string>${APP_NAME} 진단</string>
+  <key>CFBundleDisplayName</key><string>${APP_NAME}</string>
   <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
   <key>CFBundleExecutable</key><string>${APP_NAME}</string>
   <key>CFBundlePackageType</key><string>APPL</string>

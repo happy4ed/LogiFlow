@@ -73,4 +73,4 @@ jobs:
           (cd release-assets && shasum -a 256 --check "LogiFlow-v${VERSION}-mac-SHA256SUMS.txt")
           gh release create "mac-v${VERSION}" release-assets/* \
             --target "$COMMIT_SHA" --title "LogiFlow macOS ${VERSION}" \
-            --notes-file mac/docs/RELEASE_NOTES_mac_v0.1.0.md
+            --notes-file mac/docs/RELEASE_NOTES_mac_v0.2.0.md --prerelease

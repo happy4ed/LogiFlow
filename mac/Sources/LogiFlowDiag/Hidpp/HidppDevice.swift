@@ -114,6 +114,24 @@ final class HidppDevice {
         }
     }
 
+    /// 0x1814 func1 setHost(targetHost) — 호스트 전환(쓰기). 윈도우 `HidppDevice.SetHost` 대응.
+    /// 기기가 전환 즉시 연결을 끊으므로 응답을 기다리지 않는다(fire-and-forget).
+    /// drainMs=0 이면 drain 없이 바로 돌아온다(여러 기기에 연달아 보내는 묶음 전송용).
+    /// 호출 측(HostSwitcher)에서 (a)0x1814 지원 (b)0~hostCount-1 범위를 이미 검증한다.
+    func setHost(deviceIndex: UInt8, changeHostIndex: UInt8, targetHost: UInt8, writeTimeoutMs: Int, drainMs: Int = 120) -> Bool {
+        let report = buildReport(deviceIndex: deviceIndex, featureIndex: changeHostIndex, funcIndex: 1, parms: [targetHost])
+        log.log(String(format: "TX(setHost) dev=0x%02X feat=0x%02X target=%d  [%@]",
+                       deviceIndex, changeHostIndex, targetHost, DiagLogger.hex(report)))
+        guard stream.write(report, timeoutMs: writeTimeoutMs) else {
+            log.logError(String(format: "setHost 전송 실패 dev=0x%02X", deviceIndex))
+            return false
+        }
+        if drainMs > 0, let resp = stream.read(timeoutMs: drainMs) {
+            log.logRx(resp)
+        }
+        return true
+    }
+
     /// IRoot ping(func1): 응답 echo 로 장치 존재 확인.
     func ping(deviceIndex: UInt8, timeoutMs: Int) -> Bool {
         let marker: UInt8 = 0x5A

@@ -1,9 +1,12 @@
 import Foundation
+import IOKit.hid
 
 /// 발견된 HID++ 장치 1개(= 인터페이스 × deviceIndex)의 진단 결과.
-/// 윈도우 `ScanResult` 대응(단, 전환용 Interface 재오픈 필드는 읽기 전용이라 생략).
+/// 윈도우 `ScanResult` 대응. 전환(setHost) 때 같은 인터페이스를 다시 열도록 IOHIDDevice 를 들고 있다.
 final class ScanResult: Identifiable {
     let id = UUID()
+    var interface: HidInterfaceInfo? = nil
+    var device: IOHIDDevice? = nil
     var deviceName: String? = nil      // HID++ 0x0005 또는 제품 문자열
     var vidPid: String = ""            // 046D:XXXX
     var path: String = ""              // 합성 식별자

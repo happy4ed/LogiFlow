@@ -1,15 +1,14 @@
 import SwiftUI
+import AppKit
 
-/// LogiFlow macOS 진단 도구 — 윈도우 버전의 「읽기부터 확인」 첫 단계.
-/// 로지텍 HID++ 기기를 찾아 0x1814 정보(기능 인덱스·호스트 개수·현재 채널)를 읽는다.
-/// 전환·엣지·풀 UI 는 다음 단계. 쓰기(setHost)는 하지 않는 읽기 전용.
+/// LogiFlow macOS — 로지텍 Easy-Switch 채널 전환·변 밀기 전환·glow (윈도우판 0.14.3 이식).
+/// 메뉴 막대에 상주하고, 창은 설정·진단용. 창을 닫아도 앱(변 감시)은 계속 돈다.
 @main
 struct LogiFlowApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
+
     var body: some Scene {
-        WindowGroup("LogiFlow 진단 (mac)") {
-            ContentView()
-                .frame(minWidth: 720, minHeight: 440)
-        }
+        Settings { EmptyView() }
     }
 }
 
@@ -18,71 +17,126 @@ enum AppInfo {
         if let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !v.isEmpty {
             return v
         }
-        return "0.1.0"
+        return "0.2.0"
     }
 }
 
-/// 스캔 상태를 담는 뷰 모델. 스캔은 백그라운드에서 돌고 결과만 메인에 반영한다.
-final class DiagViewModel: ObservableObject {
-    @Published var results: [ScanResult] = []
-    @Published var scanning = false
-    @Published var statusLine = "준비됨 — 「새로 고침」으로 스캔"
-    @Published var logPath = ""
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    let model = AppModel()
+    private var window: NSWindow?
+    private var statusItem: NSStatusItem?
 
-    private let logger = DiagLogger()
-
-    init() {
-        logPath = logger.logPath.path
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        model.start()
+        setupStatusItem()
+        showWindow()
     }
 
-    func refresh() {
-        guard !scanning else { return }
-        scanning = true
-        statusLine = "스캔 중…"
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            let scanner = DeviceScanner(log: self.logger)
-            let found = scanner.scan()
-            DispatchQueue.main.async {
-                self.results = found
-                self.scanning = false
-                let switchable = found.filter { $0.changeHostSupported }.count
-                self.statusLine = String(format: "장치 %d개 (전환 가능 0x1814 %d개) · 로그: %@",
-                                         found.count, switchable, self.logger.logPath.lastPathComponent)
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { showWindow() }
+        return true
+    }
+
+    @objc func showWindow() {
+        if window == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 620),
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                             backing: .buffered, defer: false)
+            w.title = "LogiFlow"
+            w.contentViewController = NSHostingController(rootView: ContentView(vm: model))
+            w.isReleasedWhenClosed = false
+            w.center()
+            window = w
+        }
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - 메뉴 막대
+
+    private func setupStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            button.image = NSImage(systemSymbolName: "arrow.left.arrow.right.square", accessibilityDescription: "LogiFlow")
+        }
+        let menu = NSMenu()
+        menu.delegate = self
+        item.menu = menu
+        statusItem = item
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let here = model.thisHost
+        if model.switchable.isEmpty {
+            let none = NSMenuItem(title: "전환 가능한 기기 없음", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        } else {
+            for ch in 0..<model.channelCount {
+                let title = ch == here ? "채널 \(ch + 1) (이 Mac)" : "채널 \(ch + 1) 으로 전환"
+                let mi = NSMenuItem(title: title, action: ch == here ? nil : #selector(menuSwitch(_:)), keyEquivalent: "")
+                mi.target = self
+                mi.tag = ch
+                mi.isEnabled = ch != here && !model.switching
+                menu.addItem(mi)
             }
         }
+        menu.addItem(.separator())
+        let edge = NSMenuItem(title: "변으로 밀어 넘기기", action: #selector(toggleEdge), keyEquivalent: "")
+        edge.target = self
+        edge.state = model.edgeEnabled ? .on : .off
+        menu.addItem(edge)
+        let rescan = NSMenuItem(title: "기기 다시 찾기", action: #selector(rescan), keyEquivalent: "")
+        rescan.target = self
+        menu.addItem(rescan)
+        let open = NSMenuItem(title: "창 열기", action: #selector(showWindow), keyEquivalent: "")
+        open.target = self
+        menu.addItem(open)
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
+
+    @objc private func menuSwitch(_ sender: NSMenuItem) { model.switchTo(channel: sender.tag) }
+    @objc private func toggleEdge() { model.edgeEnabled.toggle() }
+    @objc private func rescan() { model.refresh() }
 }
 
+// MARK: - 창
+
 struct ContentView: View {
-    @StateObject private var vm = DiagViewModel()
+    @ObservedObject var vm: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
-            if vm.results.isEmpty {
-                emptyState
-            } else {
-                deviceTable
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    switchSection
+                    edgeSection
+                    devicesSection
+                }
+                .padding(16)
             }
             Divider()
             footer
         }
-        .onAppear { vm.refresh() }   // 창이 뜨면 자동으로 1회 스캔.
+        .frame(minWidth: 680, minHeight: 520)
     }
 
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("LogiFlow 진단").font(.headline)
-                Text("로지텍 HID++ · 0x1814 읽기 전용 · v\(AppInfo.version)")
-                    .font(.caption).foregroundColor(.secondary)
+                Text("LogiFlow").font(.headline)
+                Text("로지텍 Easy-Switch · v\(AppInfo.version)").font(.caption).foregroundColor(.secondary)
             }
             Spacer()
-            if vm.scanning { ProgressView().scaleEffect(0.7).padding(.trailing, 6) }
+            if vm.scanning || vm.switching { ProgressView().scaleEffect(0.7).padding(.trailing, 6) }
             Button(action: { vm.refresh() }) {
-                Label("새로 고침", systemImage: "arrow.clockwise")
+                Label("기기 다시 찾기", systemImage: "arrow.clockwise")
             }
             .keyboardShortcut("r", modifiers: .command)
             .disabled(vm.scanning)
@@ -90,31 +144,75 @@ struct ContentView: View {
         .padding(12)
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 8) {
-            Spacer()
-            Image(systemName: "dot.radiowaves.left.and.right")
-                .font(.system(size: 36)).foregroundColor(.secondary)
-            Text(vm.scanning ? "스캔 중…" : "응답한 HID++ 장치 없음")
-                .foregroundColor(.secondary)
-            if !vm.scanning {
-                Text("기기가 연결/깨어 있는지 확인 후 「새로 고침」. 다른 앱(Logi Options+)이\n기기를 선점하면 조회가 막힐 수 있습니다.")
-                    .font(.caption).foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var deviceTable: some View {
-        ScrollView {
-            VStack(spacing: 10) {
-                ForEach(vm.results) { r in
-                    DeviceRow(result: r)
+    private var switchSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("채널 전환").font(.headline)
+            if vm.switchable.isEmpty {
+                Text("전환 가능한 기기 없음 — 마우스·키보드가 이 Mac 에 연결돼 있어야 함")
+                    .font(.callout).foregroundColor(.secondary)
+            } else {
+                HStack(spacing: 8) {
+                    ForEach(0..<vm.channelCount, id: \.self) { ch in
+                        Button(ch == vm.thisHost ? "채널 \(ch + 1) (이 Mac)" : "채널 \(ch + 1) 으로") {
+                            vm.switchTo(channel: ch)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .disabled(ch == vm.thisHost || vm.switching)
+                    }
                 }
             }
-            .padding(12)
+        }
+    }
+
+    private var edgeSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("변으로 밀어 넘기기").font(.headline)
+                Spacer()
+                Toggle("", isOn: $vm.edgeEnabled).labelsHidden().toggleStyle(.switch)
+            }
+            Text("커서를 화면 끝에 대고 바깥으로 0.5초 밀면 그 채널로 넘어감. 넘어가는 순간 변이 가장 밝게 빛남.")
+                .font(.caption).foregroundColor(.secondary)
+            ForEach(0..<vm.channelCount, id: \.self) { ch in
+                if ch != vm.thisHost {
+                    HStack {
+                        Text("채널 \(ch + 1)").frame(width: 70, alignment: .leading)
+                        Picker("", selection: Binding<String>(
+                            get: {
+                                guard let b = vm.binding(for: ch) else { return "" }
+                                return "\(b.displayID):\(b.edge.rawValue)"
+                            },
+                            set: { v in
+                                let parts = v.split(separator: ":")
+                                if parts.count == 2, let id = UInt32(parts[0]), let e = HandoffEdge(rawValue: String(parts[1])) {
+                                    vm.setBinding(channel: ch, displayID: id, edge: e)
+                                } else {
+                                    vm.setBinding(channel: ch, displayID: nil, edge: nil)
+                                }
+                            })) {
+                            Text("쓰지 않음").tag("")
+                            ForEach(vm.screens) { s in
+                                ForEach(HandoffEdge.allCases, id: \.self) { e in
+                                    Text("\(s.name) · \(e.label) 변").tag("\(s.id):\(e.rawValue)")
+                                }
+                            }
+                        }
+                        .labelsHidden()
+                    }
+                }
+            }
+        }
+    }
+
+    private var devicesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("기기").font(.headline)
+            if vm.results.isEmpty {
+                Text(vm.scanning ? "찾는 중…" : "응답한 HID++ 기기 없음 — 기기가 연결·깨어 있는지 확인 후 「기기 다시 찾기」")
+                    .font(.callout).foregroundColor(.secondary)
+            } else {
+                ForEach(vm.results) { r in DeviceRow(result: r) }
+            }
         }
     }
 
@@ -122,7 +220,7 @@ struct ContentView: View {
         HStack {
             Text(vm.statusLine).font(.caption).foregroundColor(.secondary)
             Spacer()
-            Text(vm.logPath).font(.caption2).foregroundColor(.secondary).textSelection(.enabled)
+            Text(vm.logger.logPath.path).font(.caption2).foregroundColor(.secondary).textSelection(.enabled)
         }
         .padding(10)
     }
@@ -146,10 +244,7 @@ struct DeviceRow: View {
                 field("VID:PID", result.vidPid)
                 field("연결", result.connectionType ?? "-")
                 field("deviceIndex", String(format: "0x%02X", result.deviceIndex))
-            }
-            HStack(spacing: 16) {
-                field("0x1814 인덱스", result.changeHostIndex != 0 ? String(format: "0x%02X", result.changeHostIndex) : "-")
-                field("호스트 개수", result.hostCount >= 0 ? String(result.hostCount) : "-")
+                field("채널 수", result.hostCount >= 0 ? String(result.hostCount) : "-")
                 field("현재 채널", result.currentHost >= 0 ? String(result.currentHost + 1) : "-")
             }
             if let note = result.note, !note.isEmpty {
