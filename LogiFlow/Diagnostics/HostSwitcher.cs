@@ -132,5 +132,90 @@ namespace LogiFlow.Diagnostics
             }
             return switched;
         }
+
+        /// <summary>
+        /// 바탕화면 워커 전용 — 모든 기기에 setHost 를 기기 사이 대기 없이 '먼저 연달아' 쓰고, 그다음 확인한다.
+        /// (기존 SwitchAllVerbose 는 기기마다 ping 200ms + 확인 300ms 를 기다린 뒤 다음 기기로 가서 두 번째 기기가
+        /// 0.5초 이상 늦게 넘어갔다.) 첫 쓰기가 성공한 순간 onDelivered 를 부른다 — glow 최고점 = 실제 전달 시점.
+        /// 첫 시도는 깨우기(ping) 없이 바로 쓴다(바탕화면에서 마우스를 밀고 있으면 기기는 깨어 있음).
+        /// 실패한 기기만 ping 으로 깨운 뒤 재시도. 쓰기 경로(HidppDevice.SetHost)·가드는 SwitchAllVerbose 와 동일.
+        /// </summary>
+        public static int SwitchAllBurst(IEnumerable<ScanResult> devices, int targetHost, DiagLogger raw, Action<string> say, int attempts, Action onDelivered)
+        {
+            var pending = new List<ScanResult>();
+            foreach (var d in devices)
+            {
+                if (d == null || d.Interface == null) continue;
+                // (a) 0x1814 지원 (b) 채널 범위 — SwitchOne 과 동일 가드.
+                if (!d.ChangeHostSupported || d.ChangeHostIndex == 0)
+                {
+                    say(string.Format("  {0}: 0x1814 미지원 — 건너뜀", d.DeviceName));
+                    continue;
+                }
+                if (targetHost < 0 || (d.HostCount >= 0 && targetHost >= d.HostCount))
+                {
+                    say(string.Format("  {0}: 채널 {1} 범위 밖(호스트 {2}) — 건너뜀", d.DeviceName, targetHost + 1, d.HostCount));
+                    continue;
+                }
+                pending.Add(d);
+            }
+
+            int switched = 0;
+            bool delivered = false;
+            for (int a = 1; a <= attempts && pending.Count > 0; a++)
+            {
+                var streams = new HidStream[pending.Count];
+                var hidpps = new HidppDevice[pending.Count];
+                var wrote = new bool[pending.Count];
+                try
+                {
+                    // 1) 쓰기 묶음.
+                    for (int i = 0; i < pending.Count; i++)
+                    {
+                        var d = pending[i];
+                        try
+                        {
+                            streams[i] = HidStream.Open(d.Interface);
+                            hidpps[i] = new HidppDevice(streams[i], raw);
+                            if (a > 1) { try { hidpps[i].Ping(d.DeviceIndex, 200); } catch { } }
+                            wrote[i] = hidpps[i].SetHost(d.DeviceIndex, d.ChangeHostIndex, (byte)targetHost, WriteTimeoutMs, 0);
+                        }
+                        catch (Exception ex) { say(string.Format("  {0}: 시도{1} 쓰기 예외 {2}", d.DeviceName, a, ex.Message)); }
+                        if (wrote[i] && !delivered)
+                        {
+                            delivered = true;
+                            if (onDelivered != null) { try { onDelivered(); } catch { } }
+                        }
+                    }
+
+                    // 2) 확인 — 전환되면 기기가 이 리시버에서 사라져 응답이 없는 게 정상(= 성공 신호).
+                    var next = new List<ScanResult>();
+                    for (int i = 0; i < pending.Count; i++)
+                    {
+                        var d = pending[i];
+                        bool ok = false, got = false;
+                        int nb, cur = -1;
+                        string why = null;
+                        if (wrote[i])
+                        {
+                            try { got = hidpps[i].GetHostInfo(d.DeviceIndex, d.ChangeHostIndex, 300, out nb, out cur); ok = !got || cur == targetHost; }
+                            catch (Exception ex) { why = "확인 예외 " + ex.Message; }
+                        }
+                        say(string.Format("  {0}: 시도{1} 쓰기={2} 확인={3} → {4}",
+                            d.DeviceName, a, wrote[i] ? "성공" : "실패",
+                            why ?? (!wrote[i] ? "-" : got ? ("현재채널 " + (cur + 1)) : "응답없음(전환추정)"),
+                            ok ? "전환됨" : "미전환"));
+                        if (ok) switched++; else next.Add(d);
+                    }
+                    pending = next;
+                }
+                finally
+                {
+                    foreach (var st in streams) if (st != null) { try { st.Dispose(); } catch { } }
+                }
+                if (pending.Count > 0 && a < attempts) System.Threading.Thread.Sleep(150);
+            }
+            return switched;
+        }
     }
 }

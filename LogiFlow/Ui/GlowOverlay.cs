@@ -95,14 +95,20 @@ namespace LogiFlow.Ui
 
     /// <summary>
     /// 엣지 glow/tension 애니메이션. EdgeWatcher 의 progress 를 받아 ~60fps 로 부드럽게 반영한다.
-    /// progress 가 쌓이면 색이 진해지고 변 쪽 띠가 두꺼워지며(tension), dwell 이 차기 직전(PeakAt)
-    /// 가장 밝아진다. 전환 순간에는 즉시 사라진다(전환 뒤에 빛이 남거나 새로 켜지지 않게).
+    /// dwell 이 차는 동안 색이 진해지고 변 쪽 띠가 두꺼워지며(tension) DwellCeiling 까지 오른다.
+    /// 최고점은 setHost 가 실제로 나간 순간(Delivered)에 한 번 보이고 곧바로 사라진다.
+    /// 전환이 실패하면(Failed·시간 초과) 최고점 없이 흐려진다.
     /// </summary>
     internal sealed class GlowController : IDisposable
     {
         private const int MaxBand = 90;
-        // dwell 의 이 비율에서 최대 밝기 도달 → 전환 직전까지 최대 유지.
-        private const double PeakAt = 0.85;
+        // dwell 동안의 상한 · 전환 요청 후 전달을 기다리는 동안의 밝기. 최고점(1.0)은 전달 순간 몫.
+        private const double DwellCeiling = 0.8;
+        private const double SendingLevel = 0.9;
+        // 전달 신호를 이 시간 안에 못 받으면 실패로 보고 흐려진다.
+        private const int SendTimeoutMs = 1500;
+        // 전달 순간 최고점을 보이는 틱 수(16ms 단위) — 그다음 바로 숨김.
+        private const int PeakTicks = 3;
 
         private readonly GlowOverlayForm _form;
         private readonly Timer _timer;
@@ -112,6 +118,9 @@ namespace LogiFlow.Ui
         private HandoffRect _mon;
         private HandoffEdge _edge;
         private double _shown;
+        private bool _sending;
+        private int _sendStart;
+        private int _peakLeft;
 
         public GlowController()
         {
@@ -127,17 +136,19 @@ namespace LogiFlow.Ui
         {
             if (g.Fired)
             {
-                // 전환 순간: 남은 프레임 없이 바로 숨긴다.
-                _hasTarget = false; _targetProgress = 0; _shown = 0;
-                _timer.Stop();
-                _form.HideOverlay();
-                return;
+                // 전환 요청: 밝기를 끌어올린 채 실제 전달(Delivered)을 기다린다.
+                _mon = g.Monitor; _edge = g.Edge;
+                _sending = true; _sendStart = Environment.TickCount; _peakLeft = 0;
+                _hasTarget = true; _targetProgress = SendingLevel;
             }
-            if (g.Active)
+            else if (_sending || _peakLeft > 0)
+            {
+                return; // 전환 중엔 남은 raw 입력이 glow 를 흔들지 않게.
+            }
+            else if (g.Active)
             {
                 _mon = g.Monitor; _edge = g.Edge;
-                double t = g.Progress / PeakAt;
-                _targetProgress = t > 1 ? 1 : t;
+                _targetProgress = Math.Max(0, Math.Min(1, g.Progress)) * DwellCeiling;
                 _hasTarget = true;
             }
             else
@@ -147,10 +158,56 @@ namespace LogiFlow.Ui
             if (!_timer.Enabled) _timer.Start();
         }
 
+        /// <summary>setHost 가 실제로 나간 순간(아무 스레드에서나). 최고점을 바로 그리고 잠깐 뒤 숨긴다.</summary>
+        public void Delivered()
+        {
+            if (_form.InvokeRequired)
+            {
+                try { _form.BeginInvoke((Action)Delivered); }
+                catch { }
+                return;
+            }
+            if (!_sending) return;
+            _sending = false;
+            _peakLeft = PeakTicks;
+            try { Render(1.0, true); }
+            catch { }
+            if (!_timer.Enabled) _timer.Start();
+        }
+
+        /// <summary>전환 실패·건너뜀(아무 스레드에서나). 최고점 없이 흐려진다.</summary>
+        public void Failed()
+        {
+            if (_form.InvokeRequired)
+            {
+                try { _form.BeginInvoke((Action)Failed); }
+                catch { }
+                return;
+            }
+            _sending = false; _peakLeft = 0;
+            _hasTarget = false; _targetProgress = 0;
+            if (!_timer.Enabled) _timer.Start();
+        }
+
         private void OnTick(object sender, EventArgs e)
         {
+            if (_peakLeft > 0)
+            {
+                if (--_peakLeft == 0)
+                {
+                    _shown = 0; _hasTarget = false; _targetProgress = 0;
+                    _form.HideOverlay();
+                    _timer.Stop();
+                }
+                return;
+            }
+            if (_sending && Environment.TickCount - _sendStart > SendTimeoutMs)
+            {
+                _sending = false; _hasTarget = false; _targetProgress = 0;
+            }
+
             double target = _hasTarget ? _targetProgress : 0;
-            // 오를 때는 빠르게 따라가 dwell 전에 최대에 닿고, 내릴 때는 부드럽게.
+            // 오를 때는 빠르게 따라가고, 내릴 때는 부드럽게.
             _shown += (target - _shown) * (target > _shown ? 0.5 : 0.3);
 
             double vis = _shown;
@@ -162,11 +219,11 @@ namespace LogiFlow.Ui
                 _timer.Stop();
                 return;
             }
-            try { Render(vis); }
+            try { Render(vis, false); }
             catch { }
         }
 
-        private void Render(double progress)
+        private void Render(double progress, bool peak)
         {
             HandoffRect m = _mon;
             bool horizontal = _edge == HandoffEdge.Top || _edge == HandoffEdge.Bottom;
@@ -174,7 +231,7 @@ namespace LogiFlow.Ui
             if (length <= 0) return;
 
             Color accent = Theme.Accent;
-            using (Bitmap canon = RenderCanonical(length, progress, accent))
+            using (Bitmap canon = RenderCanonical(length, progress, peak, accent))
             {
                 int posX, posY;
                 switch (_edge)
@@ -197,7 +254,7 @@ namespace LogiFlow.Ui
         }
 
         /// <summary>기준(Right 변) glow 비트맵: 폭 MaxBand × 높이 length, 오른쪽이 변.</summary>
-        private static Bitmap RenderCanonical(int length, double progress, Color accent)
+        private static Bitmap RenderCanonical(int length, double progress, bool peak, Color accent)
         {
             int W = MaxBand;
             var bmp = new Bitmap(W, Math.Max(1, length), PixelFormat.Format32bppArgb);
@@ -207,10 +264,10 @@ namespace LogiFlow.Ui
                 g.Clear(Color.Transparent);
 
                 double inten = progress; if (inten < 0) inten = 0; if (inten > 1) inten = 1;
-                // progress 0 이면 아무것도 안 보이고, 쌓일수록 진해진다(최대 = 전환 직전).
+                // progress 0 이면 아무것도 안 보이고, 쌓일수록 진해진다. peak = 전달 순간의 흰빛 최고점.
 
                 // 1) 부드러운 glow 그라데이션(안쪽 투명 → 변쪽 진함). 색이 진해지는 느낌.
-                int glowA = (int)(inten * 190);
+                int glowA = peak ? 235 : (int)(inten * 190);
                 if (glowA > 0)
                 {
                     using (var br = new LinearGradientBrush(new Rectangle(0, 0, W, bmp.Height),
@@ -219,15 +276,15 @@ namespace LogiFlow.Ui
                 }
 
                 // 2) tension 코어: 변에 붙은 띠가 progress 로 두꺼워지고 끝에서 흰빛이 돈다.
-                double coreT = 2 + inten * 32;
-                int coreA = (int)(inten * 240);
-                Color coreC = Theme.Blend(Color.White, accent, inten * inten * 0.45);
+                double coreT = peak ? 40 : 2 + inten * 32;
+                int coreA = peak ? 255 : (int)(inten * 240);
+                Color coreC = Theme.Blend(Color.White, accent, peak ? 0.75 : inten * inten * 0.4);
                 using (var cb = new SolidBrush(Color.FromArgb(coreA, coreC)))
                     g.FillRectangle(cb, (float)(W - coreT), 0, (float)coreT, bmp.Height);
 
                 // 3) 가장 밝은 변 선.
-                int lineA = (int)(inten * 255);
-                Color lineC = Theme.Blend(Color.White, accent, inten * 0.5);
+                int lineA = peak ? 255 : (int)(inten * 255);
+                Color lineC = peak ? Color.White : Theme.Blend(Color.White, accent, inten * 0.5);
                 using (var lb = new SolidBrush(Color.FromArgb(lineA, lineC)))
                     g.FillRectangle(lb, W - 2.5f, 0, 2.5f, bmp.Height);
             }

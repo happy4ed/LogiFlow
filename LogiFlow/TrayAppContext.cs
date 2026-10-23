@@ -270,6 +270,7 @@ namespace LogiFlow
             {
                 int sent = HostSwitcher.SwitchAll(devices, channel, Log);
                 Log.Log(string.Format("엣지 전환 전송: {0}개", sent));
+                if (sent > 0) _glow.Delivered(); else _glow.Failed();
                 try { _settings.BeginInvoke((Action)(() => UpdateTray(null))); } catch { }
             });
             t.IsBackground = true; t.Start();

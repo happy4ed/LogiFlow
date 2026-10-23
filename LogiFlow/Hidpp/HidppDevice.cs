@@ -192,8 +192,9 @@ namespace LogiFlow.Hidpp
         /// 기기가 전환 즉시 USB/BT 연결을 리셋하므로 응답을 기다리지 않는다(fire-and-forget):
         /// 리포트를 보내고 짧게 drain 후 무시한다. 명시적 전환 버튼에서만 호출해야 한다.
         /// 호출 측(HostSwitcher)에서 (a)0x1814 지원 (b)0~hostCount-1 범위를 이미 검증한다.
+        /// drainMs=0 이면 drain 없이 바로 돌아온다(여러 기기에 연달아 보내는 묶음 전송용).
         /// </summary>
-        public bool SetHost(byte deviceIndex, byte changeHostIndex, byte targetHostIndex, int writeTimeoutMs)
+        public bool SetHost(byte deviceIndex, byte changeHostIndex, byte targetHostIndex, int writeTimeoutMs, int drainMs = 120)
         {
             byte[] report = BuildReport(deviceIndex, changeHostIndex, 1, new byte[] { targetHostIndex });
             _log.Log(string.Format("TX(setHost) dev=0x{0:X2} feat=0x{1:X2} target={2}  [{3}]",
@@ -207,9 +208,13 @@ namespace LogiFlow.Hidpp
             }
 
             // 전환 후 기기는 사라지므로 응답은 오지 않을 수 있다. 짧게 한 번 읽고 버린다.
+            if (drainMs <= 0)
+            {
+                return true;
+            }
             try
             {
-                byte[] resp = _stream.Read(120);
+                byte[] resp = _stream.Read(drainMs);
                 if (resp != null)
                 {
                     _log.LogRx(resp);

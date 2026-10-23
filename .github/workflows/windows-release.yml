@@ -114,4 +114,4 @@ jobs:
           (cd release-assets && sha256sum --check "LogiFlow-v${VERSION}-SHA256SUMS.txt")
           gh release create "v${VERSION}" release-assets/* \
             --target "$COMMIT_SHA" --title "LogiFlow ${VERSION}" \
-            --notes-file docs/RELEASE_NOTES_v0.14.2.md --prerelease
+            --notes-file docs/RELEASE_NOTES_v0.14.3.md --prerelease

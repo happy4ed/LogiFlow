@@ -107,6 +107,12 @@ namespace LogiFlow.Handoff
 
         public bool HasAttachments { get { return _attachments.Count > 0; } }
 
+        /// <summary>전환이 실패하면 변을 떠나지 않고 계속 밀어도 다시 시도되게 재무장한다(UI 스레드).</summary>
+        public void Rearm()
+        {
+            foreach (var at in _attachments) at.Detector.Reset(false);
+        }
+
         public void Start()
         {
             if (_running) return;
@@ -184,7 +190,7 @@ namespace LogiFlow.Handoff
                     _log.Log(string.Format("엣지 전환 트리거: 모니터 {0} 변 {1} → 채널 {2}",
                         at.MonitorDeviceName, at.Edge, at.Channel + 1));
                     int channel = at.Channel;
-                    // 전환 순간: glow 즉시 숨김.
+                    // 전환 요청: glow 는 실제 전달(GlowController.Delivered)을 기다린다.
                     ReportGlow(new EdgeGlow { Active = true, Fired = true, Monitor = at.Bounds, Edge = at.Edge, Progress = 1.0, Channel = at.Channel });
                     _lastGlowActive = false;
                     // 다른 변의 dwell 도 리셋(중복 트리거 방지).
