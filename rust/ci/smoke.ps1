@@ -49,3 +49,5 @@ Write-Host "autostart registration ok=$autoOk"
 Remove-Item $cfgPath -ErrorAction SilentlyContinue
 
 if (-not ($alive -and $started -and $scanned -and $autoOk)) { exit 1 }
+# Actions 의 pwsh 래퍼는 마지막 $LASTEXITCODE 로 끝난다 — 위 schtasks 조회(작업 없음 = 1)가 결과를 뒤집지 않게.
+exit 0

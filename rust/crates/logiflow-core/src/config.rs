@@ -97,6 +97,13 @@ fn b(v: bool) -> &'static str {
 }
 
 impl AppConfig {
+    /// 트레이가 가장자리 감시를 켤 조건(계획서 2.4 의 3 · C# `ReconfigureWatcher`) — 「로그온 전에도 실행」 꺼짐 +
+    /// 가장자리 자동 전환 켜짐 + 배치 있음 + 전환 가능 기기 있음. 서비스가 켜져 있으면 워커가 전담하므로 끈다.
+    /// (C# 판과 동시 실행 막기는 Windows 쪽에서 따로 검사.)
+    pub fn tray_should_watch(&self, has_attachments: bool, switchable_count: usize) -> bool {
+        !self.pre_logon && self.edge_switch_enabled && has_attachments && switchable_count > 0
+    }
+
     pub fn alias_for(&self, channel: i32) -> String {
         match self.aliases.iter().find(|(c, _)| *c == channel) {
             Some((_, v)) if !v.is_empty() => v.clone(),

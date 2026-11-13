@@ -1,4 +1,4 @@
-//! 코어 자동 시험 — 계획서 4.1~4.4 · 4.6 · 4.8~4.10 자동분.
+//! 코어 자동 시험 — 계획서 4.1~4.4 · 4.6~4.10 자동분.
 
 use crate::cache;
 use crate::clip;
@@ -386,6 +386,23 @@ fn layout_snap_and_resolve() {
     assert_eq!(resolve_attachment(&mons, &far, 30), None);
     let below = HandoffRect::new(20, 120, 180, 101);
     assert_eq!(resolve_attachment(&mons, &below, 30), Some((0, HandoffEdge::Bottom)));
+}
+
+// ---------- 4.7 트레이 감시 켜는 조건 ----------
+
+#[test]
+fn tray_watch_needs_all_four_conditions() {
+    let mut c = AppConfig::default();
+    c.pre_logon = false;
+    c.edge_switch_enabled = true;
+    assert!(c.tray_should_watch(true, 1));
+    assert!(!c.tray_should_watch(false, 1), "배치 없음");
+    assert!(!c.tray_should_watch(true, 0), "전환 가능 기기 없음");
+    c.edge_switch_enabled = false;
+    assert!(!c.tray_should_watch(true, 1), "가장자리 자동 전환 꺼짐");
+    c.edge_switch_enabled = true;
+    c.pre_logon = true;
+    assert!(!c.tray_should_watch(true, 1), "서비스(로그온 전에도 실행) 켜짐 → 워커가 전담");
 }
 
 // ---------- 4.9 파일 형식 ----------

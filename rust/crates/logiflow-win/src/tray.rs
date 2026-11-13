@@ -420,7 +420,7 @@ fn reconfigure_watcher() {
     edge_watcher::stop();
     edge_watcher::configure(cfg.dwell_ms, cfg.drag_guard, &cfg.attachments);
     // B안: 서비스가 켜지면 바탕화면 전환은 서비스 워커가 전담(트레이는 감시 안 함).
-    if !cfg.pre_logon && cfg.edge_switch_enabled && edge_watcher::has_attachments() && sw > 0 {
+    if cfg.tray_should_watch(edge_watcher::has_attachments(), sw) {
         if legacy::conflict() {
             log.log("기존 LogiFlow(C# 판) 실행 중 — 가장자리 감시 끔(중복 전환 방지)");
         } else {
