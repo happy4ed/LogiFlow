@@ -301,6 +301,20 @@ fn come_back(this_channel: i32) -> String {
     }
 }
 
+/// 「모두 전환」 끝줄 — 기기마다 지금 채널이 다르면 기기별 번호를 적는다.
+fn come_back_all(sw: &[ScanResult], current: i32) -> String {
+    let chans: Vec<i32> = sw.iter().map(|d| d.current_host).collect();
+    if chans.iter().all(|c| *c == current) {
+        return come_back(current);
+    }
+    let each: Vec<String> = sw
+        .iter()
+        .filter(|d| d.current_host >= 0)
+        .map(|d| format!("{} {}번", d.device_name, d.current_host + 1))
+        .collect();
+    format!("이 PC 로 되돌리려면 기기마다 Easy-Switch 단추에서 지금 번호를 누르세요({}).", each.join(" · "))
+}
+
 fn log_dir() -> std::path::PathBuf {
     logiflow_win::util::exe_dir().join("logs")
 }
@@ -790,13 +804,16 @@ impl SettingsApp {
         // 「자세히 보기」 ↔ 「간단히 보기」 — 목록 표시만 바꾸므로 링크, 목록 머리 바로 옆.
         let link = if self.detail { "간단히 보기" } else { "자세히 보기" };
         let link_w = pc.btn_w(link, None);
-        if pc.button("detail", x0 + head_w + 4.0, y, link_w, bh, link, None, Variant::Ghost, true) {
+        // 머리 글이 길어 「다시 찾기」와 겹치면 링크는 한 줄 아래로.
+        let fits = x0 + head_w + 4.0 + link_w <= x0 + w - rw - 8.0;
+        let (lx, ly) = if fits { (x0 + head_w + 4.0, y) } else { (x0 - 14.0, y + bh) };
+        if pc.button("detail", lx, ly, link_w, bh, link, None, Variant::Ghost, true) {
             self.detail = !self.detail;
         }
         if pc.button("rescan", x0 + w - rw, y, rw, bh, rescan, Some(Icon::Refresh), Variant::Default, !scanning) {
             self.rescan();
         }
-        y += bh + 4.0;
+        y += bh + 4.0 + if fits { 0.0 } else { bh };
         y += pc.wrap(x0, y, w, "연결된 로지텍 마우스·키보드를 자동으로 찾습니다.", DESC, false, p.muted);
         y += 6.0;
         if shown.is_empty() {
@@ -986,7 +1003,7 @@ impl SettingsApp {
             "{}\r\n→ {}\r\n\r\n모두 전환할까요? 전환하면 이 PC 에서는 이 기기들을 쓸 수 없습니다.\r\n{}",
             names.join(" · "),
             cfg.channel_label(target),
-            come_back(current)
+            come_back_all(sw, current)
         );
         if self.msg(&q, "모두 전환", MB_YESNO | MB_ICONWARNING) != IDYES {
             return;
