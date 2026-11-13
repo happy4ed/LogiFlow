@@ -177,6 +177,10 @@ mod win {
             steps.push((page, true, 1, true, 0));
         }
         steps.push((1, false, 1, false, 1)); // 클립보드 공유 끔(접힘)
+        steps.push((1, false, 1, true, 1));
+        for off in [-1, 1, 3] {
+            steps.push((1, false, off, false, 3)); // 설정 가운데(클립보드 공유 위쪽)
+        }
         steps.push((0, false, 1, true, 2)); // 기기 자세히 보기
         steps.push((0, false, 3, true, 2));
         let viewport = egui::ViewportBuilder::default().with_title("LogiFlow").with_inner_size([820.0, 660.0]);

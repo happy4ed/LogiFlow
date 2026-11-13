@@ -94,7 +94,7 @@ pub struct SettingsApp {
     pub snapshot: Option<Snapshot>,
 }
 
-/// 화면 캡처 한 장 = (화면, 다크, 글자 단계, 아래로 스크롤, 모양: 0 기본 · 1 클립보드 공유 끔 · 2 기기 자세히 보기).
+/// 화면 캡처 한 장 = (화면, 다크, 글자 단계, 아래로 스크롤, 모양: 0 기본 · 1 클립보드 공유 끔 · 2 기기 자세히 보기 · 3 가운데쯤 스크롤).
 pub type SnapStep = (usize, bool, i32, bool, u8);
 
 pub struct Snapshot {
@@ -596,7 +596,7 @@ impl SettingsApp {
             pc,
             w,
             "전환 관리",
-            "채널 상자를 끌어 이 PC 모니터의 가장자리에 붙이면, 그 가장자리로 커서를 밀 때 마우스·키보드가 모두 그 채널의 PC 로 넘어갑니다. 떼어 두면 자동으로 넘어가지 않습니다.",
+            "채널은 마우스·키보드의 Easy-Switch 단추 번호(1~3)이고, 단추마다 PC 가 하나씩 짝지어져 있습니다. 채널 상자를 끌어 이 PC 모니터의 가장자리에 붙이면, 그 가장자리로 커서를 밀 때 마우스·키보드가 모두 그 채널의 PC 로 넘어갑니다. 떼어 두면 자동으로 넘어가지 않습니다.",
         );
 
         // 캔버스(이 PC 모니터 + 다른 채널 상자).
@@ -632,15 +632,15 @@ impl SettingsApp {
             self.set_layout(cfg, att);
         }
         y += canvas_h + 8.0;
-        // 캔버스 바로 아래: 왼쪽 「모두 떼기」(붙인 채널이 있을 때) · 오른쪽 「되돌리기」(바꾼 적이 있을 때).
+        // 캔버스 바로 아래: 왼쪽 「채널 모두 떼기」(붙인 채널이 있을 때) · 오른쪽 「되돌리기」(바꾼 적이 있을 때).
         let bh = pc.btn_h();
         let mut row = false;
         if !cfg.attachments.is_empty() {
-            let rw = pc.btn_w("모두 떼기", None);
-            if pc.button("reset", x0, y, rw, bh, "모두 떼기", None, Variant::Default, true)
+            let rw = pc.btn_w("채널 모두 떼기", None);
+            if pc.button("reset", x0, y, rw, bh, "채널 모두 떼기", None, Variant::Default, true)
                 && self.ask(
-                    "모니터에 붙인 채널 상자를 모두 뗄까요?\r\n떼면 가장자리로 밀어도 넘어가지 않습니다.\r\n바로 옆 「되돌리기」로 되살릴 수 있습니다.",
-                    "모두 떼기",
+                    "모니터에 붙인 채널 상자를 모두 뗄까요?\r\n떼면 가장자리로 밀어도 넘어가지 않습니다.\r\n캔버스 아래 「되돌리기」로 되살릴 수 있습니다.",
+                    "채널 모두 떼기",
                 )
             {
                 let att = self.canvas.clear_placements();
@@ -747,7 +747,7 @@ impl SettingsApp {
             x0,
             y,
             w,
-            "다른 PC 를 알아보기 쉬운 이름을 붙입니다. 누르면 바꿀 수 있고, 비우면 「채널 N」으로 돌아갑니다.",
+            "채널마다 짝지어 둔 PC 를 알아보기 쉬운 이름을 붙입니다. 누르면 바꿀 수 있고, 비우면 「채널 N」으로 돌아갑니다.",
             DESC,
             false,
             p.muted,
@@ -901,13 +901,13 @@ impl SettingsApp {
             let all_label = "모두 전환";
             let aw = pc.btn_w(all_label, Some(Icon::ChevronDown)) + 10.0;
             let t_w = w - aw - 16.0;
-            let th = pc.wrap_h("마우스·키보드를 한꺼번에 다른 PC 로 보냅니다.", DESC, false, t_w);
+            let th = pc.wrap_h("마우스·키보드를 한꺼번에 다른 채널의 PC 로 보냅니다.", DESC, false, t_w);
             let row_h = th.max(bh) + 20.0;
             pc.wrap(
                 x0,
                 y + (row_h - th) / 2.0,
                 t_w,
-                "마우스·키보드를 한꺼번에 다른 PC 로 보냅니다.",
+                "마우스·키보드를 한꺼번에 다른 채널의 PC 로 보냅니다.",
                 DESC,
                 false,
                 p.muted,
@@ -1252,7 +1252,7 @@ impl SettingsApp {
                 let line = if i == 0 {
                     Line::new("이 PC 주소", "상대 PC 의 「상대 PC 주소」에 이 값만 넣습니다(포트는 넣지 않음).")
                 } else {
-                    Line::new("다른 주소", "위 주소로 연결되지 않으면 이 주소를 넣어 보세요.")
+                    Line::new("이 PC 의 다른 주소", "위 주소로 연결되지 않으면 이 주소를 넣어 보세요.")
                 };
                 let copied = matches!(self.copied, Some((k, t)) if k == i && t.elapsed().as_secs_f32() < 2.0);
                 if copied {
@@ -1842,6 +1842,14 @@ impl SettingsApp {
             s.config.font_offset = off;
             s.config.clip_enabled = variant != 1;
         }
+        // 펼침 등으로 콘텐츠 높이가 바뀐 뒤 한 번 더 맞춘다(첫 프레임의 맨 아래는 옛 높이 기준이라).
+        if sn.frames == 3 {
+            if bottom {
+                self.offset = 1.0e6;
+            } else if variant == 3 {
+                self.offset = (self.content_h / 2.0 - 300.0).max(0.0);
+            }
+        }
         let sn = self.snapshot.as_mut().unwrap();
         sn.frames += 1;
         // 백그라운드 조회(방화벽·테스트 작업)가 끝날 시간을 조금 준다.
@@ -1853,7 +1861,7 @@ impl SettingsApp {
                 if dark { "dark" } else { "light" },
                 off,
                 if bottom { "-bottom" } else { "" },
-                ["", "-clipoff", "-detail"][variant as usize]
+                ["", "-clipoff", "-detail", "-mid"][variant as usize]
             );
             let path = sn.dir.join(name);
             let _ = std::fs::create_dir_all(&sn.dir);
