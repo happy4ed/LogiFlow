@@ -11,11 +11,14 @@ use std::time::Duration;
 const WRITE_TIMEOUT_MS: u32 = 400;
 
 /// (a)(b) 가드. 위반 사유(로그·안내 문구용) 또는 None.
+/// 지금 판과 다른 점: 호스트 수를 모르면(getHostInfo 무응답 · -1) 범위를 확인할 수 없으므로 보내지 않는다
+/// (C# 은 이때 범위 검사를 건너뜀). 화면·트레이·가장자리 경로는 원래 호스트 수가 확인된 기기만 넘기므로
+/// 실제 동작 차이는 없다 — 이 가드는 마지막 방어선.
 fn guard(d: &ScanResult, target: i32) -> Option<GuardFail> {
     if !d.change_host_supported || d.change_host_index == 0 {
         return Some(GuardFail::Unsupported);
     }
-    if target < 0 || (d.host_count >= 0 && target >= d.host_count) {
+    if target < 0 || d.host_count <= 0 || target >= d.host_count {
         return Some(GuardFail::OutOfRange);
     }
     None

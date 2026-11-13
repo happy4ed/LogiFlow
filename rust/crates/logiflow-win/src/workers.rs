@@ -23,7 +23,32 @@ use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, KillTimer, SetTimer, WM_TIMER};
 
 fn read_edges() -> LogonEdgeFile {
-    read_lines(&paths::logon_edges_path()).map(|l| logon_edges::parse(&l)).unwrap_or_default()
+    read_edges_opt().unwrap_or_default()
+}
+
+/// 파일이 없거나 비었으면 None(쓰는 중·지워진 순간에 배치를 비워 버리지 않게).
+fn read_edges_opt() -> Option<LogonEdgeFile> {
+    let lines = read_lines(&paths::logon_edges_path())?;
+    if !lines.iter().any(|l| l.trim_start().starts_with("dwellMs=")) {
+        return None;
+    }
+    Some(logon_edges::parse(&lines))
+}
+
+/// 바탕화면 워커용 — 머신 공유 파일의 배치를 EdgeAttachment 로.
+fn attachments_of(cfg: &LogonEdgeFile) -> Vec<EdgeAttachment> {
+    cfg.edges
+        .iter()
+        .map(|e| EdgeAttachment {
+            channel: e.channel,
+            monitor_device_name: e.device.clone(),
+            edge: HandoffEdge::from_i32(e.edge).unwrap_or(HandoffEdge::Right),
+        })
+        .collect()
+}
+
+fn edges_mtime() -> Option<std::time::SystemTime> {
+    std::fs::metadata(paths::logon_edges_path()).and_then(|m| m.modified()).ok()
 }
 
 pub fn is_locked() -> bool {
@@ -130,45 +155,8 @@ fn logon_switch_loop() {
             ));
         }
     }
-    let mut dets: Vec<Det> = Vec::new();
-    for e in &cfg.edges {
-        let s = scr
-            .iter()
-            .find(|m| m.name == e.device)
-            .or_else(|| if e.index >= 0 { scr.get(e.index as usize) } else { None });
-        let s = match s {
-            Some(s) => s,
-            None => {
-                probe_log(&format!("엣지 매칭 실패(모니터 없음): {} idx={}", e.device, e.index));
-                continue;
-            }
-        };
-        let edge = HandoffEdge::from_i32(e.edge).unwrap_or(HandoffEdge::Right);
-        // 폴링은 화면 끝에 막힌 커서의 '바깥 밀기'를 못 읽는다 → 밀기 요건 0 = 변에서 dwell 채우면 전환.
-        let d = Det {
-            det: EdgeDetector::new(cfg.dwell_ms, 0),
-            rect: s.bounds,
-            edge,
-            channel: e.channel,
-            label: format!("{} {}", s.name, edge.name()),
-        };
-        if debug {
-            let b = s.bounds;
-            probe_log(&format!(
-                "엣지 등록: {} mon=({},{} {}x{}) → 채널 {}",
-                d.label,
-                b.left,
-                b.top,
-                b.width,
-                b.height,
-                d.channel + 1
-            ));
-        }
-        dets.push(d);
-    }
-    if dets.is_empty() {
-        probe_log("※ 적용할 엣지 0개 — [전환 관리]에서 채널 박스를 변에 붙였는지 확인하세요.");
-    }
+    let mut dets = build_dets(&cfg, &scr, debug);
+    let mut cur_cfg = cfg;
 
     let original = session::thread_desktop();
     let (mut last_x, mut last_y, mut have_last) = (0, 0, false);
@@ -222,10 +210,17 @@ fn logon_switch_loop() {
         let now = tick_ms();
         if now - last_cfg_read > 4000 {
             last_cfg_read = now;
-            let dbg = read_edges().debug;
-            if dbg != debug {
-                debug = dbg;
-                probe_log(&format!("디버그 모드 {} (설정 반영)", if debug { "켜짐" } else { "꺼짐" }));
+            // 서비스가 켜진 채 배치·대기 시간을 바꿔도 워커를 다시 띄우지 않고 반영(지금 판은 디버그만 다시 읽었음).
+            if let Some(nc) = read_edges_opt() {
+                if nc.debug != debug {
+                    debug = nc.debug;
+                    probe_log(&format!("디버그 모드 {} (설정 반영)", if debug { "켜짐" } else { "꺼짐" }));
+                }
+                if nc.edges != cur_cfg.edges || nc.dwell_ms != cur_cfg.dwell_ms {
+                    dets = build_dets(&nc, &monitors::all(), debug);
+                    probe_log(&format!("설정 바뀜 → 엣지 {}개 · dwell={}ms 다시 적용", dets.len(), nc.dwell_ms));
+                }
+                cur_cfg = nc;
             }
         }
         if last_name.as_deref() != Some(name.as_str()) {
@@ -308,6 +303,50 @@ fn logon_switch_loop() {
     }
 }
 
+/// 로그인 화면 워커의 가장자리 판정기 — logon-edges 의 배치·대기 시간으로 만든다(시작 때 + 설정이 바뀔 때마다).
+fn build_dets(cfg: &LogonEdgeFile, scr: &[monitors::Monitor], debug: bool) -> Vec<Det> {
+    let mut dets: Vec<Det> = Vec::new();
+    for e in &cfg.edges {
+        let s = scr
+            .iter()
+            .find(|m| m.name == e.device)
+            .or_else(|| if e.index >= 0 { scr.get(e.index as usize) } else { None });
+        let s = match s {
+            Some(s) => s,
+            None => {
+                probe_log(&format!("엣지 매칭 실패(모니터 없음): {} idx={}", e.device, e.index));
+                continue;
+            }
+        };
+        let edge = HandoffEdge::from_i32(e.edge).unwrap_or(HandoffEdge::Right);
+        // 폴링은 화면 끝에 막힌 커서의 '바깥 밀기'를 못 읽는다 → 밀기 요건 0 = 변에서 dwell 채우면 전환.
+        let d = Det {
+            det: EdgeDetector::new(cfg.dwell_ms, 0),
+            rect: s.bounds,
+            edge,
+            channel: e.channel,
+            label: format!("{} {}", s.name, edge.name()),
+        };
+        if debug {
+            let b = s.bounds;
+            probe_log(&format!(
+                "엣지 등록: {} mon=({},{} {}x{}) → 채널 {}",
+                d.label,
+                b.left,
+                b.top,
+                b.width,
+                b.height,
+                d.channel + 1
+            ));
+        }
+        dets.push(d);
+    }
+    if dets.is_empty() {
+        probe_log("※ 적용할 엣지 0개 — [전환 관리]에서 채널 박스를 변에 붙였는지 확인하세요.");
+    }
+    dets
+}
+
 // ===================== 바탕화면 워커 =====================
 
 /// `--desktop-switch` — 서비스가 winsta0\default 에 띄움. 트레이와 같은 raw 판정 + glow.
@@ -321,15 +360,7 @@ pub fn run_desktop_switch() {
     say("==================================================");
     say("desktop-switch(B) 워커 시작 — Default 데스크탑 raw 엣지 전환");
     let cfg = read_edges();
-    let attachments: Vec<EdgeAttachment> = cfg
-        .edges
-        .iter()
-        .map(|e| EdgeAttachment {
-            channel: e.channel,
-            monitor_device_name: e.device.clone(),
-            edge: HandoffEdge::from_i32(e.edge).unwrap_or(HandoffEdge::Right),
-        })
-        .collect();
+    let attachments = attachments_of(&cfg);
     say(&format!("엣지 {}개 · dwell={}ms", attachments.len(), cfg.dwell_ms));
 
     // setHost 는 별도 스레드(UI 스레드가 막히면 glow 가 멈춤). 진행 중 표시·마지막 전환 시각은 스캐너도 본다.
@@ -411,8 +442,27 @@ pub fn run_desktop_switch() {
     // self-exit: 콘솔 세션이 바뀌면 3초 뒤 종료 → supervisor 가 교체.
     let my_session = session::current_session();
     let off = std::cell::Cell::new(0);
+    // 서비스가 켜진 채 「끌기 중 전환 막기」·배치·머무는 시간을 바꾸면 1초 안에 판정기에 다시 적용
+    // (트레이가 logon-edges 를 새로 쓰면 수정 시각이 바뀐다). 지금 판은 워커가 다시 뜰 때까지 옛 값이었다.
+    let applied = std::cell::RefCell::new((edges_mtime(), cfg));
     let timer_handler: wnd::Handler = Rc::new(move |_h, msg, _w, _l| {
         if msg == WM_TIMER {
+            let m = edges_mtime();
+            if m != applied.borrow().0 {
+                if let Some(nc) = read_edges_opt() {
+                    let mut a = applied.borrow_mut();
+                    if nc.edges != a.1.edges || nc.dwell_ms != a.1.dwell_ms || nc.drag_guard != a.1.drag_guard {
+                        edge_watcher::configure(nc.dwell_ms, nc.drag_guard, &attachments_of(&nc));
+                        probe_log(&format!(
+                            "desktop-switch 워커: 설정 바뀜 → 엣지 {}개 · dwell={}ms · 끌기 중 막기={}",
+                            nc.edges.len(),
+                            nc.dwell_ms,
+                            if nc.drag_guard { "켜짐" } else { "꺼짐" }
+                        ));
+                    }
+                    *a = (m, nc);
+                }
+            }
             let cur = session::active_console_session();
             if cur != NO_SESSION && cur != my_session {
                 off.set(off.get() + 1);

@@ -364,19 +364,36 @@ fn decode_png(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
 
 /// 이 PC 의 IPv4 주소들 + 포트(상대 PC 에 입력할 값). C#: Dns.GetHostAddresses(Dns.GetHostName()).
 pub fn local_info(port: i32) -> String {
+    let ips = local_ips();
+    format!("{} : {}", if ips.is_empty() { "?".to_string() } else { ips.join(", ") }, port)
+}
+
+/// 이 PC 의 IPv4 주소들 — 상대 PC 에 넣을 가능성이 높은 순서(집·사무실 공유기 192.168 → 10 → 172.16~31 → 나머지).
+/// 가상 어댑터(WSL·Hyper-V 등)는 보통 172.x 라 뒤로 간다.
+pub fn local_ips() -> Vec<String> {
     let host = computer_dns_name();
-    let mut ips: Vec<String> = Vec::new();
+    let mut ips: Vec<std::net::Ipv4Addr> = Vec::new();
     if let Ok(it) = (host.as_str(), 0u16).to_socket_addrs() {
         for a in it {
             if let SocketAddr::V4(v4) = a {
-                let s = v4.ip().to_string();
-                if !ips.contains(&s) {
-                    ips.push(s);
+                let ip = *v4.ip();
+                if !ip.is_loopback() && !ip.is_link_local() && !ips.contains(&ip) {
+                    ips.push(ip);
                 }
             }
         }
     }
-    format!("{} : {}", if ips.is_empty() { "?".to_string() } else { ips.join(", ") }, port)
+    let rank = |ip: &std::net::Ipv4Addr| {
+        let o = ip.octets();
+        match o {
+            [192, 168, ..] => 0,
+            [10, ..] => 1,
+            [172, b, ..] if (16..=31).contains(&b) => 2,
+            _ => 3,
+        }
+    };
+    ips.sort_by_key(rank); // 안정 정렬 — 같은 등급은 원래 순서
+    ips.into_iter().map(|ip| ip.to_string()).collect()
 }
 
 fn computer_dns_name() -> String {
@@ -396,27 +413,32 @@ fn computer_dns_name() -> String {
 pub fn test_connect(host: &str, port: i32) -> String {
     let host = clip::norm(host);
     if host.is_empty() {
-        return "상대 주소가 비어 있습니다.".into();
+        return "상대 PC 주소가 비어 있습니다.".into();
     }
     match connect(&host, port) {
-        Ok(_) => format!("연결 OK — 상대 {}:{} 에 닿음.", host, port),
-        Err(SendErr::Timeout) => "실패: 연결 시간초과 — 방화벽/주소/포트 확인.".into(),
-        Err(SendErr::Other(e)) => format!("실패: {}", e),
+        Ok(_) => format!("상대 PC({}, 포트 {})에 연결됩니다.", host, port),
+        Err(SendErr::Timeout) => {
+            "상대 PC 에 연결하지 못했습니다(시간 초과).\r\n상대 PC 가 켜져 있는지, 주소가 맞는지, 상대 PC 의 방화벽이 허용됐는지 확인하세요.".into()
+        }
+        Err(SendErr::Other(e)) => format!("상대 PC 에 연결하지 못했습니다.\r\n({})", e),
     }
 }
 
 /// 상대에게 테스트 텍스트를 보낸다(종단 확인). running = 트레이 쪽 공유가 켜져 있는지.
 pub fn send_test(running: bool, cfg: &AppConfig) -> String {
     if !running || cfg.clip_secret.is_empty() {
-        return "먼저 '사용'을 켜고 상대 주소·암호문구를 설정하세요.".into();
+        return "먼저 클립보드 공유를 켜고 상대 PC 주소와 암호문구를 넣어 주세요.".into();
     }
     let keys = clip::derive_keys(&cfg.clip_secret);
-    let msg = format!("LogiFlow 클립보드 연결 테스트 ✓ {}", crate::session::local_time_hms().get(..8).unwrap_or(""));
+    let msg = format!("LogiFlow 연결 확인 ✓ {}", crate::session::local_time_hms().get(..8).unwrap_or(""));
     let frame = clip::encrypt(&keys, &clip::text_payload(&msg));
     let host = clip::norm(&cfg.clip_peer_host);
     match send_frame(&host, cfg.clip_port, &frame) {
-        Ok(()) => format!("보냄 OK — 상대 PC 에서 붙여넣기(Ctrl+V) 해서\r\n\"{}\"\r\n가 나오면 양방향 성공입니다.", msg),
-        Err(SendErr::Timeout) => "실패: 상대 연결 시간초과 — 상대 PC 가 켜져 있고 방화벽 허용됐는지 확인.".into(),
-        Err(SendErr::Other(e)) => format!("실패: {}", e),
+        Ok(()) => format!(
+            "보냈습니다. 상대 PC 에서 붙여 넣기(Ctrl+V) 했을 때\r\n\"{}\"\r\n가 나오면 연결된 것입니다.",
+            msg
+        ),
+        Err(SendErr::Timeout) => "보내지 못했습니다(시간 초과).\r\n상대 PC 가 켜져 있는지, 상대 PC 의 방화벽이 허용됐는지 확인하세요.".into(),
+        Err(SendErr::Other(e)) => format!("보내지 못했습니다.\r\n({})", e),
     }
 }

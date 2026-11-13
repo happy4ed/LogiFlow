@@ -1,5 +1,7 @@
 //! 전환 관리 캔버스 — C# `MonitorLayoutPanel` 이식. 이 PC 모니터를 실제 배치로 그리고, 다른 채널 PC 박스
-//! (모니터 크기 사각형)를 변에 끌어 붙인다. 접촉 = 자동(파랑 실선) · 분리 = 수동(회색 점선).
+//! (모니터 크기 사각형)를 가장자리에 끌어 붙인다. 붙음 = 자동(파랑 실선) · 떨어짐 = 수동(회색 점선).
+//! rs.3(첫 사용 점검 반영): 아래 줄 상자의 상태 글자가 잘리지 않게 자리를 비우고, 이름이 기본값이면 「채널 N」만,
+//! 모니터에는 이 PC 의 채널을 적고, 상태 글자는 파랑(누를 수 있는 것) 대신 보조색, 상자 위에서는 손 모양 커서.
 
 use crate::paint::{c, draw_icon, font, rounded_points, Icon};
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
@@ -46,6 +48,8 @@ pub struct Canvas {
     mon_rects: Vec<HandoffRect>,
     box_w: f32,
     box_h: f32,
+    /// 상자 아래 상태 글자 한 줄 높이(아래 줄 상자가 캔버스 밖으로 글자를 밀어내지 않게).
+    sub_h: f32,
 }
 
 impl Canvas {
@@ -195,7 +199,7 @@ impl Canvas {
             let aspect = if self.box_w > 1.0 { self.box_h / self.box_w } else { 0.6 };
             let th = tw * aspect;
             let x = PAD + tray_index as f32 * (tw + gap);
-            let y = self.size.y - th - PAD - 2.0;
+            let y = self.size.y - th - PAD - self.sub_h - 4.0;
             return Rect::from_min_size(Pos2::new(x, y), Vec2::new(tw, th));
         }
         if b.monitor_index >= self.mon_rects.len() {
@@ -214,8 +218,10 @@ impl Canvas {
         pal: &'static Palette,
         off: i32,
         interactive: bool,
-        alias: &dyn Fn(i32) -> String,
+        label: &dyn Fn(i32) -> String,
+        this_pc: Option<String>,
     ) -> Option<Vec<EdgeAttachment>> {
+        self.sub_h = ui.painter().layout_no_wrap("가".into(), font(10.0, off, false), Color32::WHITE).size().y;
         self.relayout(viewport);
         self.recompute_monitor_rects();
         let host = Rect::from_min_size(origin, viewport);
@@ -236,35 +242,42 @@ impl Canvas {
             y += 22.0;
         }
 
-        // 모니터.
+        // 모니터(이 PC). 누를 수 없는 것이라 파랑을 쓰지 않는다. 글자는 칸에 들어가는 줄만(넘치면 그 줄 생략).
+        let multi = self.mon_rects.len() > 1;
         for (i, m) in self.mon_rects.iter().enumerate() {
             let rect = at(Rect::from_min_size(
                 Pos2::new(m.left as f32, m.top as f32),
                 Vec2::new(m.width as f32, m.height as f32),
             ));
             let primary = i == self.primary;
-            p.rect_filled(rect, CornerRadius::same(5), c(if primary { pal.mon_primary_fill() } else { pal.mon_fill }));
-            p.rect_stroke(
-                rect,
-                CornerRadius::same(5),
-                Stroke::new(1.5, c(if primary { pal.accent } else { pal.mon_stroke })),
-                StrokeKind::Middle,
-            );
-            p.text(
-                rect.center() + Vec2::new(0.0, -8.0),
-                Align2::CENTER_CENTER,
-                format!("모니터 {}", i + 1),
-                font(10.5, off, true),
-                c(pal.ink),
-            );
-            if primary {
-                p.text(
-                    rect.center() + Vec2::new(0.0, 10.0),
-                    Align2::CENTER_CENTER,
-                    "주 모니터",
-                    font(10.5, off, false),
-                    c(pal.accent),
-                );
+            p.rect_filled(rect, CornerRadius::same(5), c(pal.mon_fill));
+            p.rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.5, c(pal.mon_stroke)), StrokeKind::Middle);
+            let mut lines: Vec<(String, bool)> = vec![(format!("모니터 {}", i + 1), true)];
+            if let Some(t) = &this_pc {
+                lines.push((t.clone(), false));
+            }
+            if multi && primary {
+                lines.push(("주 모니터".into(), false));
+            }
+            let galleys: Vec<_> = lines
+                .into_iter()
+                .map(|(t, bold)| p.layout_no_wrap(t, font(10.5, off, bold), c(if bold { pal.ink } else { pal.muted })))
+                .filter(|g| g.size().x <= rect.width() - 6.0)
+                .collect();
+            let mut shown = Vec::new();
+            let mut total = 0.0;
+            for g in galleys {
+                if total + g.size().y > rect.height() - 4.0 {
+                    break;
+                }
+                total += g.size().y;
+                shown.push(g);
+            }
+            let mut ty = rect.center().y - total / 2.0;
+            for g in shown {
+                let h = g.size().y;
+                p.galley(Pos2::new(rect.center().x - g.size().x / 2.0, ty), g, c(pal.ink));
+                ty += h;
             }
         }
 
@@ -294,16 +307,16 @@ impl Canvas {
                 Rect::from_center_size(r.center(), Vec2::splat(gs)),
                 c(if auto { pal.accent } else { pal.muted }),
             );
-            let title = format!("채널 {} · {}", self.boxes[i].channel + 1, alias(self.boxes[i].channel));
+            let title = label(self.boxes[i].channel);
             let ft = font(11.0, off, true);
             let th = p.layout_no_wrap(title.clone(), ft.clone(), Color32::WHITE).size().y;
             p.text(Pos2::new(r.left(), r.top() - th - 2.0), Align2::LEFT_TOP, title, ft, c(pal.ink));
             p.text(
                 Pos2::new(r.left(), r.bottom() + 2.0),
                 Align2::LEFT_TOP,
-                if auto { "접촉 · 자동" } else { "분리 · 수동" },
+                if auto { "붙음 · 자동" } else { "떨어짐 · 수동" },
                 font(10.0, off, false),
-                c(if auto { pal.accent } else { pal.muted }),
+                c(pal.muted),
             );
         }
 
@@ -312,6 +325,23 @@ impl Canvas {
         }
         let resp = ui.interact(host, Id::unique("lf-canvas"), Sense::click_and_drag());
         let local = |pos: Pos2| pos - origin.to_vec2();
+        // 끌 수 있다는 단서 — 상자 위에선 손(잡기), 끄는 중엔 쥔 손.
+        if self.dragging.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if let Some(hp) = resp.hover_pos() {
+            let lp = local(hp);
+            let mut tray_i = 0;
+            for i in 0..self.boxes.len() {
+                let placed = self.boxes[i].placed;
+                if self.display_rect(i, if placed { 0 } else { tray_i }).contains(lp) {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                    break;
+                }
+                if !placed {
+                    tray_i += 1;
+                }
+            }
+        }
         if resp.drag_started() {
             if let Some(press) = ui.input(|i| i.pointer.press_origin()) {
                 let lp = local(press);

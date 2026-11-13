@@ -14,12 +14,25 @@ pub const IROOT_INDEX: u8 = 0x00;
 pub const FEATURE_CHANGE_HOST: u16 = 0x1814;
 pub const FEATURE_DEVICE_NAME: u16 = 0x0005;
 
+/// 쓰기 허가표 — 이 crate 안에서만 만들 수 있다(필드가 비공개 · 복제 불가). OS 어댑터는 `HidTransport::write`
+/// 를 구현할 수는 있어도 부를 수는 없다. 그래서 기기로 나가는 모든 출력 리포트는 이 crate 의 조회(`call`)와
+/// 가드를 거친 `set_host` 에서만 나간다(계획서 3.1 의 2 「원시 쓰기는 비공개」를 구조로 강제).
+pub struct WriteToken {
+    _private: (),
+}
+
+impl WriteToken {
+    pub(crate) fn new() -> Self {
+        WriteToken { _private: () }
+    }
+}
+
 /// 열린 HID 인터페이스 1개(OS 어댑터가 구현). report[0] 은 리포트 ID.
 pub trait HidTransport {
     /// 출력 리포트 길이(바이트, 리포트 ID 포함). 0 이면 모름.
     fn output_report_len(&self) -> usize;
-    /// 출력 리포트 전송. 시간 초과·실패 시 false.
-    fn write(&mut self, report: &[u8], timeout_ms: u32) -> bool;
+    /// 출력 리포트 전송. 시간 초과·실패 시 false. `WriteToken` 은 이 crate 만 만들 수 있다.
+    fn write(&mut self, report: &[u8], timeout_ms: u32, token: WriteToken) -> bool;
     /// 입력 리포트 1건 수신. 시간 초과 시 None.
     fn read(&mut self, timeout_ms: u32) -> Option<Vec<u8>>;
 }
@@ -89,7 +102,7 @@ impl<'a> HidppDevice<'a> {
         let report = build_report(self.t.output_report_len(), device_index, feature_index, func_index, params);
         self.log.tx(device_index, &report);
 
-        if !self.t.write(&report, timeout_ms) {
+        if !self.t.write(&report, timeout_ms, WriteToken::new()) {
             self.log
                 .timeout(&format!("Write dev=0x{:02X} feat=0x{:02X} func={}", device_index, feature_index, func_index));
             return Ok(None);
@@ -186,7 +199,7 @@ impl<'a> HidppDevice<'a> {
             target_host,
             DiagLogger::hex(&report)
         ));
-        if !self.t.write(&report, write_timeout_ms) {
+        if !self.t.write(&report, write_timeout_ms, WriteToken::new()) {
             self.log.error(&format!("setHost 전송 실패 dev=0x{:02X}", device_index));
             return false;
         }

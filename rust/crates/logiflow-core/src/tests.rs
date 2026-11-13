@@ -56,7 +56,7 @@ impl HidTransport for FakeStream {
     fn output_report_len(&self) -> usize {
         self.out_len
     }
-    fn write(&mut self, report: &[u8], _t: u32) -> bool {
+    fn write(&mut self, report: &[u8], _t: u32, _token: crate::hidpp::WriteToken) -> bool {
         self.shared.lock().unwrap().writes.push((self.path.clone(), report.to_vec()));
         let (rid, dev, feat, fb) = (report[0], report[1], report[2], report[3]);
         let func = fb >> 4;
@@ -403,6 +403,56 @@ fn tray_watch_needs_all_four_conditions() {
     c.edge_switch_enabled = true;
     c.pre_logon = true;
     assert!(!c.tray_should_watch(true, 1), "서비스(로그온 전에도 실행) 켜짐 → 워커가 전담");
+}
+
+// ---------- rs.3 · 화면 이름 · 가드 · 테스트 판정 ----------
+
+#[test]
+fn channel_label_does_not_repeat_default_name() {
+    let mut c = AppConfig::default();
+    c.set_alias(1, "노트북");
+    assert_eq!(c.channel_label(1), "채널 2 · 노트북");
+    assert_eq!(c.channel_label(2), "채널 3");
+    c.set_alias(1, "");
+    assert_eq!(c.channel_label(1), "채널 2");
+}
+
+#[test]
+fn unknown_host_count_sends_nothing() {
+    let be = backend(vec![mx()]);
+    let log = DiagLogger::null();
+    let mut r = scan::scan(&be, &log);
+    be.shared.lock().unwrap().writes.clear();
+    let m = r.iter_mut().find(|x| x.device_name == "MX Master 4").unwrap();
+    m.host_count = -1; // getHostInfo 무응답
+    assert!(!switcher::switch_one(&be, m, 0, &log));
+    assert!(!switcher::switch_one(&be, m, 1, &log));
+    let one = vec![m.clone()];
+    assert_eq!(switcher::switch_all(&be, &one, 1, &log), 0);
+    assert!(be.shared.lock().unwrap().writes.is_empty());
+}
+
+#[test]
+fn probe_result_reads_last_run() {
+    use crate::probe_result::{verdict, ProbeVerdict};
+    let l = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(verdict(&l(&["서비스 시작"])), ProbeVerdict::NotRun);
+    let base = "11:19:34.596  desktop-probe 시작 · 실행 계정=SYSTEM · 120초";
+    let def = "11:19:35.801  desktop=\"Default\" setThreadDesktop=성공(err0) GetCursorPos=(512,384)(err0)";
+    let end = "11:20:00.000  desktop-probe 종료. 위에서 desktop=\"Winlogon\" 줄의 GetCursorPos 가 '성공(좌표 변함)'이면 …";
+    assert_eq!(verdict(&l(&[base, def, end])), ProbeVerdict::NoSecureScreen);
+    let w1 = "11:19:40.000  desktop=\"Winlogon\" setThreadDesktop=성공(err0) GetCursorPos=(10,20)(err0)";
+    let w2 = "11:19:41.800  desktop=\"Winlogon\" setThreadDesktop=성공(err0) GetCursorPos=(300,20)(err0)";
+    let wf = "11:19:40.000  desktop=\"Winlogon\" setThreadDesktop=실패(err5) GetCursorPos=실패(err0)";
+    assert_eq!(verdict(&l(&[base, def, w1, w2, end])), ProbeVerdict::Works);
+    assert_eq!(verdict(&l(&[base, w1, w1, end])), ProbeVerdict::NoMovement);
+    assert_eq!(verdict(&l(&[base, wf, end])), ProbeVerdict::Blocked);
+    assert_eq!(
+        verdict(&l(&[base, "11:19:40.000  OpenInputDesktop 실패 (입력 데스크톱 접근 거부) err=5", end])),
+        ProbeVerdict::Blocked
+    );
+    // 앞 실행이 성공이어도 마지막 실행 기준.
+    assert_eq!(verdict(&l(&[base, w1, w2, end, base, def, end])), ProbeVerdict::NoSecureScreen);
 }
 
 // ---------- 4.9 파일 형식 ----------

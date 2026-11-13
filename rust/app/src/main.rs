@@ -51,6 +51,8 @@ fn main() {
         "--uninstall-probe" => probe::do_uninstall(),
         // 클립보드 수신 포트 방화벽 허용(상승된 인스턴스에서 netsh).
         "--allow-firewall" => firewall::do_allow(num(logiflow_core::clip::DEFAULT_PORT)),
+        // 러스트 판: 설정 창 「허용 해제」(상승된 인스턴스).
+        "--remove-firewall" => firewall::do_remove(),
         // 러스트 판: 설정 창 별도 프로세스.
         "--ui" => {
             logiflow_ui::run(version);

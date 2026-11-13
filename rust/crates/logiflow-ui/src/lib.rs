@@ -1,5 +1,5 @@
 //! LogiFlow 설정 창(egui) — `LogiFlowRs.exe --ui`. 트레이가 설정 열 때만 띄우고, 닫으면 끝난다.
-//! 화면은 C# 판 설정 창과 같은 크기·배치·문구·토큰(새 디자인 없음).
+//! 창 크기·토큰은 C# 판과 같고, rs.3 에서 첫 사용 점검 20건만큼 배치·문구를 고쳤다(app.rs 머리 주석).
 
 #![allow(clippy::too_many_arguments)]
 
@@ -119,7 +119,7 @@ mod win {
         defs
     }
 
-    /// `--ui-snapshot=<폴더>` — CI 화면 대조 캡처(트레이 없이 시험 자료로 3화면 × 라이트/다크).
+    /// `--ui-snapshot=<폴더>` — CI 화면 캡처(트레이 없이 시험 자료로 3화면 × 글자 3단 × 라이트, 보통 다크).
     pub fn run_snapshot(version: &str, dir: &str) {
         use logiflow_core::config::EdgeAttachment;
         use logiflow_core::edge::HandoffEdge;
@@ -129,6 +129,7 @@ mod win {
         cfg.set_alias(0, "이 PC");
         cfg.set_alias(1, "노트북");
         cfg.clip_peer_host = "192.168.0.20".into();
+        cfg.clip_enabled = true; // 펼친 모양(주소·암호문구·방화벽 줄)도 찍는다. 암호문구는 비워 「아직 없음」 모양.
         if let Some(m) = mons.first() {
             cfg.attachments.push(EdgeAttachment {
                 channel: 1,
@@ -153,15 +154,19 @@ mod win {
             devices: vec![dev("MX Master 3S", 1, 0x0A), dev("MX Keys S", 2, 0x09)],
             ..Default::default()
         }));
-        let mut steps = Vec::new();
-        for dark in [false, true] {
-            steps.push((0, dark, 1, false));
-            steps.push((1, dark, 1, false));
-            steps.push((1, dark, 1, true));
-            steps.push((2, dark, 1, false));
+        // 3화면 × 글자 3단(작게 −1 · 보통 +1 · 크게 +3) × 위/아래(라이트) + 보통 다크 위/아래 + 클립보드 꺼진 설정 화면.
+        let mut steps: Vec<crate::app::SnapStep> = Vec::new();
+        for off in [-1, 1, 3] {
+            for page in 0..3 {
+                steps.push((page, false, off, false, true));
+                steps.push((page, false, off, true, true));
+            }
         }
-        steps.push((0, false, -1, false));
-        steps.push((0, false, 3, false));
+        for page in 0..3 {
+            steps.push((page, true, 1, false, true));
+            steps.push((page, true, 1, true, true));
+        }
+        steps.push((1, false, 1, false, false));
         let viewport = egui::ViewportBuilder::default().with_title("LogiFlow").with_inner_size([820.0, 660.0]);
         let options = eframe::NativeOptions {
             viewport,

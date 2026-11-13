@@ -3,10 +3,10 @@
 ; 시험판 한정: 로그인 자동 시작(HKCU Run)을 설치 때 등록하지 않는다(C# 판과 두 트레이 동시 자동 시작 방지).
 ; 제거 때 서비스·워커 사본·예약 작업·방화벽 규칙까지 정리한다(--uninstall-cleanup, 필요할 때만 UAC).
 #ifndef AppVersion
-  #define AppVersion "0.16.0-rs.2"
+  #define AppVersion "0.16.0-rs.3"
 #endif
 #ifndef FileVersion
-  #define FileVersion "0.16.0.2"
+  #define FileVersion "0.16.0.3"
 #endif
 #ifndef DistDir
   #define DistDir "..\dist"

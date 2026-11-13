@@ -234,7 +234,7 @@ fn update_tray(status: Option<&str>) {
             title.push_str(" — ");
             title.push_str(s);
         } else if cur >= 0 {
-            title.push_str(&format!(" — 채널 {} · {}", cur + 1, t.config.alias_for(cur)));
+            title.push_str(&format!(" — {}", t.config.channel_label(cur)));
         }
         // NotifyIcon.Text 최대 63자(C# 은 62자에서 자름).
         let title: String = title.chars().take(62).collect();
@@ -250,7 +250,7 @@ fn show_menu() {
             MenuItem::Item {
                 id: 9999,
                 text: if cur >= 0 {
-                    format!("현재 채널: {} · {}", cur + 1, t.config.alias_for(cur))
+                    format!("현재 채널: {}", t.config.channel_label(cur))
                 } else {
                     "현재 채널: (미탐지)".into()
                 },
@@ -266,7 +266,7 @@ fn show_menu() {
             any = true;
             items.push(MenuItem::Item {
                 id: ID_CHANNEL + h as u32,
-                text: format!("채널 {} · {}", h + 1, t.config.alias_for(h)),
+                text: t.config.channel_label(h),
                 enabled: true,
             });
         }
@@ -285,7 +285,7 @@ fn show_menu() {
         });
         items.push(MenuItem::Item {
             id: ID_RESCAN,
-            text: "새로 고침(스캔)".into(),
+            text: "기기 다시 찾기".into(),
             enabled: true,
         });
         items.push(MenuItem::Separator);
@@ -454,9 +454,15 @@ fn apply_config(new_cfg: AppConfig) {
     push_state();
 }
 
+/// 워커가 실행 중에도 몇 초마다 다시 읽으므로, 반쯤 쓴 파일을 읽지 않게 임시 파일에 쓴 뒤 바꿔 끼운다.
 pub fn write_logon_edges(cfg: &AppConfig) {
     let names = monitors::names(&monitors::all());
-    let _ = write_utf8_bom(&paths::logon_edges_path(), &logon_edges::serialize(cfg, &names));
+    let path = paths::logon_edges_path();
+    let tmp = path.with_extension("tmp");
+    if write_utf8_bom(&tmp, &logon_edges::serialize(cfg, &names)).is_ok() && std::fs::rename(&tmp, &path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        let _ = write_utf8_bom(&path, &logon_edges::serialize(cfg, &names));
+    }
 }
 
 pub fn remove_logon_edges() {

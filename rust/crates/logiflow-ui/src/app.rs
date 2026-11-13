@@ -1,15 +1,22 @@
-//! 설정 창 — C# `MainForm`(사이드바 + 전환 관리·설정·진단 3화면)과 대화상자(진행 모달·라이선스)를
-//! 같은 좌표·같은 문구로. 상태의 주인은 트레이 — 여기서는 보기와 편집 요청만(IPC).
+//! 설정 창 — C# `MainForm`(사이드바 + 전환 관리·설정·진단 3화면)과 대화상자(진행 모달·라이선스).
+//! 상태의 주인은 트레이 — 여기서는 보기와 편집 요청만(IPC).
+//!
+//! rs.3: 처음 쓰는 사람 점검 20건을 반영해 C# 1:1 에서 벗어났다(회장님 지시 "일단 다 고쳐서 포팅해줘봐").
+//! 글은 고정 높이 상자 대신 남는 폭에서 줄바꿈하고 줄 높이가 글에 맞춰 늘어난다(글자 크기 3단 모두 잘림 없음).
+//! 같은 일은 한 곳에만 두고(가장자리 자동 전환 → 전환 관리 · 기기 다시 찾기 → 전환 관리 · 기록 → 진단),
+//! 단추 글은 동작만, 파랑은 누를 수 있는 것에만 쓴다. 바뀐 곳 전체는 `docs/RELEASE_NOTES_v0.16.0-rs.3.md`.
 
 use crate::canvas::{Canvas, Screen};
 use crate::paint::{c, nav_button, thumb_color, Icon, Pc, Variant};
-use egui::{Align2, Color32, CornerRadius, Event, Id, MouseWheelUnit, Pos2, Rect, Sense, Ui, Vec2, ViewportBuilder, ViewportCommand, ViewportId};
-use logiflow_core::config::{AppConfig, ThemeMode};
+use egui::{Color32, CornerRadius, Event, Id, MouseWheelUnit, Pos2, Rect, Sense, Ui, Vec2, ViewportBuilder, ViewportCommand, ViewportId};
+use logiflow_core::config::{AppConfig, EdgeAttachment, ThemeMode};
+use logiflow_core::log::read_lines;
+use logiflow_core::probe_result::{self, ProbeVerdict};
 use logiflow_core::scan::{self, looks_like_keyboard, ScanResult};
-use logiflow_core::theme::Palette;
+use logiflow_core::theme::{Palette, Rgb};
 use logiflow_win::util::message_box;
 use logiflow_win::wnd::Hwnd;
-use logiflow_win::{clipboard, firewall, ipc, legacy, monitors, notify, prelogon, probe, prompt, theme_sys, tray};
+use logiflow_win::{clipboard, firewall, ipc, legacy, monitors, notify, paths, prelogon, probe, prompt, theme_sys, tray};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use windows::Win32::Foundation::{HWND, POINT};
@@ -19,6 +26,15 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 pub const CONTENT_MAX: f32 = 560.0;
 const SIDEBAR_W: f32 = 182.0;
 const BAR_W: f32 = 10.0;
+
+/// 줄 제목 · 설명 · 카드 안 좌우 여백 · 줄 위아래 여백 · 단추 사이.
+const LAB: f32 = 9.5;
+const DESC: f32 = 8.5;
+const PX: f32 = 16.0;
+const ROW_V: f32 = 14.0;
+const GAP: f32 = 8.0;
+/// 되돌리기 기록 상한.
+const UNDO_MAX: usize = 20;
 
 /// 트레이에서 받은 상태(IPC 창 → 여기).
 #[derive(Default)]
@@ -35,7 +51,7 @@ struct Modal {
     title: String,
     step: Arc<Mutex<String>>,
     finished: Arc<Mutex<Option<(String, bool)>>>,
-    /// 끝난 뒤 설정에 반영할 「로그온 전에도 실행」 값.
+    /// 끝난 뒤 설정에 반영할 「로그인 전에도 실행」 값.
     pre_logon_after: Arc<Mutex<Option<bool>>>,
     started: Instant,
 }
@@ -48,9 +64,16 @@ pub struct SettingsApp {
     offset: f32,
     content_h: f32,
     thumb_drag: bool,
-    show_all: bool,
+    /// 진단 「자세히」 — 전환 안 되는 장치와 제품 번호까지.
+    detail: bool,
     prelogon_installed: Arc<Mutex<bool>>,
+    /// 방화벽 규칙 · 로그인 화면 테스트 작업이 있는지(None = 확인 중). 백그라운드로 조회.
+    firewall_on: Arc<Mutex<Option<bool>>>,
+    probe_installed: Arc<Mutex<Option<bool>>>,
     canvas: Canvas,
+    /// 채널 배치 되돌리기(바꾸기 전 배치를 쌓는다).
+    layout_undo: Vec<Vec<EdgeAttachment>>,
+    copied_at: Option<Instant>,
     modal: Option<Modal>,
     license: bool,
     license_offset: f32,
@@ -62,27 +85,42 @@ pub struct SettingsApp {
     pub snapshot: Option<Snapshot>,
 }
 
-/// 화면 대조 캡처 계획 — (화면, 다크, 글자 단계, 아래로 스크롤) 마다 한 장.
+/// 화면 대조 캡처 한 장 = (화면, 다크, 글자 단계, 아래로 스크롤, 클립보드 공유 켬).
+pub type SnapStep = (usize, bool, i32, bool, bool);
+
 pub struct Snapshot {
     pub dir: std::path::PathBuf,
-    pub steps: Vec<(usize, bool, i32, bool)>,
+    pub steps: Vec<SnapStep>,
     pub idx: usize,
     pub frames: u32,
     pub requested: bool,
     pub done: Arc<std::sync::atomic::AtomicBool>,
 }
 
+fn spawn_check(slot: &Arc<Mutex<Option<bool>>>, f: fn() -> bool) {
+    *slot.lock().unwrap() = None;
+    let slot = slot.clone();
+    std::thread::spawn(move || {
+        let v = f();
+        *slot.lock().unwrap() = Some(v);
+    });
+}
+
 impl SettingsApp {
     pub fn new(shared: Arc<Mutex<Shared>>, tray: Option<Hwnd>, version: String) -> Self {
         let installed = Arc::new(Mutex::new(false));
         {
-            // 로그온 전 서비스 존재를 백그라운드로 1회 조회(설정 탭 지연 방지).
+            // 로그인 전 서비스 존재를 백그라운드로 1회 조회(설정 탭 지연 방지).
             let installed = installed.clone();
             std::thread::spawn(move || {
                 let v = prelogon::is_installed();
                 *installed.lock().unwrap() = v;
             });
         }
+        let firewall_on = Arc::new(Mutex::new(None));
+        spawn_check(&firewall_on, firewall::exists);
+        let probe_installed = Arc::new(Mutex::new(None));
+        spawn_check(&probe_installed, probe::is_installed);
         SettingsApp {
             shared,
             tray,
@@ -91,9 +129,13 @@ impl SettingsApp {
             offset: 0.0,
             content_h: 0.0,
             thumb_drag: false,
-            show_all: false,
+            detail: false,
             prelogon_installed: installed,
+            firewall_on,
+            probe_installed,
             canvas: Canvas::default(),
+            layout_undo: Vec::new(),
+            copied_at: None,
             modal: None,
             license: false,
             license_offset: 0.0,
@@ -117,6 +159,18 @@ impl SettingsApp {
         }
     }
 
+    /// 배치를 바꾸기 전 지금 배치를 되돌리기 기록에 쌓고 새 배치를 적용.
+    fn set_layout(&mut self, cfg: &AppConfig, att: Vec<EdgeAttachment>) {
+        if att == cfg.attachments {
+            return;
+        }
+        self.layout_undo.push(cfg.attachments.clone());
+        if self.layout_undo.len() > UNDO_MAX {
+            self.layout_undo.remove(0);
+        }
+        self.apply(|c| c.attachments = att);
+    }
+
     fn dark(&mut self, mode: ThemeMode) -> bool {
         match mode {
             ThemeMode::Light => false,
@@ -138,6 +192,10 @@ impl SettingsApp {
 
     fn msg(&self, text: &str, title: &str, style: MESSAGEBOX_STYLE) -> MESSAGEBOX_RESULT {
         message_box(self.owner(), text, title, style)
+    }
+
+    fn ask(&self, text: &str, title: &str) -> bool {
+        self.msg(text, title, MB_YESNO | MB_ICONQUESTION) == IDYES
     }
 
     /// egui 좌표(point) → 화면 물리 좌표(메뉴 위치).
@@ -165,6 +223,12 @@ impl SettingsApp {
             ipc::send(t.get(), ipc::RESCAN, "", 1000);
         }
     }
+
+    /// 값 바꾸기 입력 상자. 확인이면 Some(정규화한 값).
+    fn prompt(&self, title: &str, label: &str, cur: &str, p: &Palette) -> Option<String> {
+        let h = self.hwnd?;
+        prompt::show(h, title, label, cur, p.content, p.ink).map(|v| logiflow_core::clip::norm(&v))
+    }
 }
 
 fn switchable(devs: &[ScanResult]) -> Vec<ScanResult> {
@@ -184,6 +248,24 @@ fn dwell_text(ms: i32) -> String {
 fn cw(vw: f32) -> f32 {
     (vw - 48.0).min(CONTENT_MAX)
 }
+/// 스캔 결과의 연결 방식을 쉬운 말로(파일 형식은 그대로 두고 화면에서만 바꾼다).
+fn connection_text(raw: &str) -> String {
+    if raw.starts_with("직접") {
+        return "USB·블루투스 직접".into();
+    }
+    if let Some(rest) = raw.strip_prefix("리시버 뒤(index ") {
+        if let Some(n) = rest.strip_suffix(')') {
+            return format!("리시버 · {}번 자리", n);
+        }
+    }
+    raw.to_string()
+}
+fn log_dir() -> std::path::PathBuf {
+    logiflow_win::util::exe_dir().join("logs")
+}
+fn has_logs() -> bool {
+    std::fs::read_dir(log_dir()).map(|mut d| d.next().is_some()).unwrap_or(false)
+}
 
 const LICENSE_BODY: &str = "LogiFlow\r\n로지텍 Easy-Switch 모니터 가장자리 자동 전환\r\n\r\nMIT License\r\n\r\nCopyright (c) 2026 happy4ed\r\n\r\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\r\n\r\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\r\n\r\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\r\n\r\n─────────────────────────────\r\n구성 / 사용 기술\r\n• Rust · egui / eframe · wgpu (MIT / Apache-2.0)\r\n• windows-rs (Microsoft, MIT / Apache-2.0) — Windows HID / SetupAPI — Logitech HID++ 2.0 (feature 0x1814 Change Host)\r\n• windows-service · arboard · png (MIT / Apache-2.0)\r\n• RustCrypto aes · cbc · hmac · sha1 · sha2 · pbkdf2 (MIT / Apache-2.0)\r\n• chrono · unicode-normalization · getrandom · subtle (MIT / Apache-2.0 · BSD-3-Clause)\r\n• 설치 패키지: Inno Setup\r\n";
 
@@ -198,7 +280,6 @@ impl eframe::App for SettingsApp {
                 if let Some(t) = self.tray {
                     ipc::send(t.get(), ipc::HELLO, &ipc::hwnd_text(crate::ipc_window()), 2000);
                 }
-                let _ = h;
             }
         }
         // 트레이가 보낸 ACTIVATE · 전환 결과.
@@ -212,15 +293,15 @@ impl eframe::App for SettingsApp {
         }
         if let Some(ok) = switch_result {
             self.busy = false;
-            self.msg(
-                if ok {
-                    "전환 명령을 보냈습니다."
-                } else {
-                    "전환 실패 — 로그를 확인하세요."
-                },
-                "LogiFlow",
-                MB_OK | MB_ICONINFORMATION,
-            );
+            if ok {
+                self.msg("전환 명령을 보냈습니다.", "채널 전환", MB_OK | MB_ICONINFORMATION);
+            } else {
+                self.msg(
+                    "전환하지 못했습니다. 기기가 켜져 있는지 확인하세요.\r\n계속 안 되면 「진단」에서 기록을 남겨 확인하세요.",
+                    "채널 전환",
+                    MB_OK | MB_ICONWARNING,
+                );
+            }
         }
 
         let (cfg, devices, scanning, clip_running) = {
@@ -246,19 +327,23 @@ impl eframe::App for SettingsApp {
         sb.icon(Icon::Mark, 16.0, 23.0, 18.0, pal.accent);
         sb.text(42.0, 22.0, "LogiFlow", 10.0, true, pal.ink);
         let nav = [("전환 관리", Icon::Swap), ("설정", Icon::Gear), ("진단", Icon::Diag)];
+        let nav_h = (sb.line_h(9.5, false) + 14.0).max(36.0);
         for (i, (t, ic)) in nav.iter().enumerate() {
-            let y = 62.0 + i as f32 * 40.0;
-            if nav_button(&sb, &format!("nav{}", i), 12.0, y, 158.0, 36.0, t, *ic, self.page == i) && self.page != i {
+            let y = 62.0 + i as f32 * (nav_h + 4.0);
+            if nav_button(&sb, &format!("nav{}", i), 12.0, y, 158.0, nav_h, t, *ic, self.page == i) && self.page != i {
                 self.page = i;
                 self.offset = 0.0; // C#: 화면 바꾸면 맨 위로
             }
         }
         let h = full.height();
-        let status_y = h - 12.0 - 20.0 - 32.0;
-        sb.icon(Icon::Plug, 18.0, status_y + 8.0, 16.0, pal.muted);
-        sb.icon(Icon::Dot, 38.0, status_y + 8.0, 16.0, pal.ok);
-        sb.text(54.0, status_y + 7.0, "LogiFlow 실행 중", 8.5, false, pal.muted);
-        sb.text(20.0, h - 32.0 + 3.0, &format!("v{}", self.version), 8.0, false, pal.muted);
+        let ver_h = sb.line_h(8.0, false);
+        let st_h = sb.line_h(8.5, false);
+        let ver_y = h - 14.0 - ver_h;
+        let status_y = ver_y - 10.0 - st_h;
+        sb.icon(Icon::Plug, 18.0, status_y + (st_h - 16.0) / 2.0, 16.0, pal.muted);
+        sb.icon(Icon::Dot, 38.0, status_y + (st_h - 16.0) / 2.0, 16.0, pal.ok);
+        sb.text(54.0, status_y, "LogiFlow 실행 중", 8.5, false, pal.muted);
+        sb.text(20.0, ver_y, &format!("v{}", self.version), 8.0, false, pal.muted);
 
         // ---- 페이지(테마 스크롤) ----
         let host = Rect::from_min_max(Pos2::new(full.left() + SIDEBAR_W, full.top()), full.max);
@@ -298,8 +383,8 @@ impl eframe::App for SettingsApp {
             };
             match self.page {
                 1 => self.settings_page(&pc, &ctx, page_w, &cfg, clip_running),
-                2 => self.diag_page(&pc, &ctx, page_w, &devices, scanning),
-                _ => self.switch_page(&pc, &ctx, page_w, &cfg, &devices),
+                2 => self.diag_page(&pc, &ctx, page_w, &cfg, &devices),
+                _ => self.switch_page(&pc, &ctx, page_w, &cfg, &devices, scanning),
             }
         };
         self.content_h = content_h;
@@ -337,20 +422,124 @@ impl eframe::App for SettingsApp {
     }
 }
 
+// ================= 줄 배치 도우미 =================
+
+/// 화면 제목(이름만) + 설명(줄바꿈). 다음 y.
+fn page_header(pc: &Pc<'_>, w: f32, title: &str, sub: &str) -> f32 {
+    let mut y = 20.0;
+    pc.text(24.0, y, title, 14.0, true, pc.pal.ink);
+    y += pc.line_h(14.0, true) + 4.0;
+    y += pc.wrap(24.0, y, w, sub, 9.0, false, pc.pal.muted);
+    y + 18.0
+}
+
+/// 카드 위 작은 묶음 이름. 다음 y.
+fn section(pc: &Pc<'_>, y: f32, title: &str) -> f32 {
+    pc.text(24.0, y, title, 8.0, true, pc.pal.muted);
+    y + pc.line_h(8.0, true) + 6.0
+}
+
+/// 카드 안 한 줄의 글 — 제목(+고급 배지), 값(있으면), 설명.
+struct Line<'s> {
+    lab: &'s str,
+    advanced: bool,
+    value: Option<(String, Rgb)>,
+    desc: String,
+}
+
+impl<'s> Line<'s> {
+    fn new(lab: &'s str, desc: impl Into<String>) -> Self {
+        Line {
+            lab,
+            advanced: false,
+            value: None,
+            desc: desc.into(),
+        }
+    }
+    fn advanced(mut self) -> Self {
+        self.advanced = true;
+        self
+    }
+    fn value(mut self, v: impl Into<String>, color: Rgb) -> Self {
+        self.value = Some((v.into(), color));
+        self
+    }
+}
+
+/// 줄 글을 그리고 줄 높이를 돌려준다. right_w = 오른쪽 조작 영역 폭 — 글은 남는 폭에서 줄바꿈한다.
+fn row_text(pc: &Pc<'_>, cx: f32, y: f32, w: f32, right_w: f32, l: &Line<'_>) -> f32 {
+    let x = cx + PX;
+    let gap = if right_w > 0.0 { 16.0 } else { 0.0 };
+    let tw = (w - 2.0 * PX - right_w - gap).max(120.0);
+    let mut yy = y + ROW_V;
+    let lh = pc.line_h(LAB, true);
+    let lw = pc.text(x, yy, l.lab, LAB, true, pc.pal.ink);
+    if l.advanced {
+        let bh = (pc.line_h(8.5, true) + 2.0).max(18.0);
+        pc.badge(x + lw + 8.0, yy + (lh - bh) / 2.0, bh, "고급", false);
+    }
+    yy += lh;
+    if let Some((v, col)) = &l.value {
+        yy += 2.0;
+        yy += pc.wrap(x, yy, tw, v, 9.0, true, *col);
+    }
+    if !l.desc.is_empty() {
+        yy += 3.0;
+        yy += pc.wrap(x, yy, tw, &l.desc, DESC, false, pc.pal.muted);
+    }
+    (yy + ROW_V - y).max(56.0)
+}
+
+/// 오른쪽에 토글이 있는 줄. (눌림, 높이).
+fn toggle_row(pc: &Pc<'_>, key: &str, cx: f32, y: f32, w: f32, l: Line<'_>, on: bool) -> (bool, f32) {
+    let h = row_text(pc, cx, y, w, 40.0, &l);
+    let clicked = pc.toggle(key, cx + w - PX - 40.0, y + (h - 22.0) / 2.0, on);
+    (clicked, h)
+}
+
+type Btn<'a> = (&'a str, Option<Icon>, Variant);
+
+fn buttons_w(pc: &Pc<'_>, btns: &[Btn<'_>]) -> f32 {
+    btns.iter().map(|(t, ic, _)| pc.btn_w(t, *ic)).sum::<f32>() + GAP * btns.len().saturating_sub(1) as f32
+}
+
+/// 오른쪽에 단추가 있는 줄(같은 성격의 단추만 한 줄에). (눌린 단추 번호, 높이).
+fn buttons_row(pc: &Pc<'_>, key: &str, cx: f32, y: f32, w: f32, l: Line<'_>, btns: &[Btn<'_>]) -> (Option<usize>, f32) {
+    let total = buttons_w(pc, btns);
+    let h = row_text(pc, cx, y, w, total, &l);
+    let bh = pc.btn_h();
+    let mut bx = cx + w - PX - total;
+    let by = y + (h - bh) / 2.0;
+    let mut hit = None;
+    for (i, (t, ic, v)) in btns.iter().enumerate() {
+        let bw = pc.btn_w(t, *ic);
+        if pc.button(&format!("{}{}", key, i), bx, by, bw, bh, t, *ic, *v, true) {
+            hit = Some(i);
+        }
+        bx += bw + GAP;
+    }
+    (hit, h)
+}
+
+/// 카드 안 줄 사이 구분선.
+fn divider(pc: &Pc<'_>, cx: f32, y: f32, w: f32) {
+    pc.hline(cx + PX, y, w - 2.0 * PX);
+}
+
 impl SettingsApp {
     // ================= 전환 관리 =================
-    fn switch_page(&mut self, pc: &Pc<'_>, ctx: &egui::Context, vw: f32, cfg: &AppConfig, devices: &[ScanResult]) -> f32 {
+    fn switch_page(&mut self, pc: &Pc<'_>, ctx: &egui::Context, vw: f32, cfg: &AppConfig, devices: &[ScanResult], scanning: bool) -> f32 {
         let p = pc.pal;
         let w = cw(vw);
-        let mut y = 20.0;
-        pc.text(24.0, y, "전환 관리", 14.0, true, p.ink);
-        pc.text(24.0, y + 28.0, "화면 끝으로 밀면 자동 전환 · 떨어뜨리면 수동", 9.0, false, p.muted);
-        if pc.button("refresh", 24.0 + w - 32.0, y, 32.0, 30.0, "", Some(Icon::Refresh), Variant::Icon, true) {
-            self.rescan();
-        }
-        y += 58.0;
+        let x0 = 24.0;
+        let mut y = page_header(
+            pc,
+            w,
+            "전환 관리",
+            "채널 상자를 끌어 이 PC 모니터의 가장자리에 붙이면, 그 가장자리로 커서를 밀 때 그 채널의 PC 로 넘어갑니다. 떼어 두면 자동으로 넘어가지 않습니다.",
+        );
 
-        // 캔버스.
+        // 캔버스(이 PC 모니터 + 다른 채널 상자).
         let canvas_h = 300.0;
         let max_host = max_host_count(devices);
         let current = current_channel(devices);
@@ -364,85 +553,207 @@ impl SettingsApp {
             })
             .collect();
         self.canvas.sync(&channels, current, &cfg.attachments, screens);
-        let alias = |ch: i32| cfg.alias_for(ch);
-        if let Some(att) = self
-            .canvas
-            .show(pc.ui, pc.origin + Vec2::new(24.0, y), Vec2::new(w, canvas_h), p, pc.off, pc.interactive, &alias)
-        {
-            self.apply(|c| c.attachments = att);
+        let label = |ch: i32| cfg.channel_label(ch);
+        let this_pc = if current >= 0 { Some(format!("채널 {}", current + 1)) } else { None };
+        if let Some(att) = self.canvas.show(
+            pc.ui,
+            pc.origin + Vec2::new(x0, y),
+            Vec2::new(w, canvas_h),
+            p,
+            pc.off,
+            pc.interactive,
+            &label,
+            this_pc,
+        ) {
+            self.set_layout(cfg, att);
         }
-        y += canvas_h + 14.0;
+        y += canvas_h + 8.0;
+        // 되돌리기 — 배치를 바꾼 적이 있을 때만.
+        let bh = pc.btn_h();
+        if !self.layout_undo.is_empty() {
+            let uw = pc.btn_w("되돌리기", None);
+            if pc.button("undo", x0 + w - uw, y, uw, bh, "되돌리기", None, Variant::Default, true) {
+                if let Some(prev) = self.layout_undo.pop() {
+                    self.apply(|c| c.attachments = prev);
+                }
+            }
+            y += bh;
+        }
+        y += 18.0;
 
-        // 채널 별칭.
-        pc.text(24.0, y, "채널 별칭   엣지에 둘 다른 PC 를 알아보기 쉽게", 9.5, true, p.ink);
-        y += 24.0;
+        // 채널 이름.
+        pc.text(x0, y, "채널 이름", LAB, true, p.ink);
+        y += pc.line_h(LAB, true) + 2.0;
+        y += pc.wrap(
+            x0,
+            y,
+            w,
+            "다른 PC 를 알아보기 쉬운 이름을 붙입니다. 누르면 바꿀 수 있고, 비우면 「채널 N」으로 돌아갑니다.",
+            DESC,
+            false,
+            p.muted,
+        );
+        y += 8.0;
         let count = max_host.max(1);
-        let gap = 8.0;
-        let chip_w = ((w - (count - 1) as f32 * gap) / count as f32).floor().max(110.0);
-        let mut ax = 24.0;
+        let chip_w = ((w - (count - 1) as f32 * GAP) / count as f32).floor().max(110.0);
+        let chip_h = (pc.line_h(8.5, false) + 14.0).max(32.0);
+        let mut ax = x0;
         for ch in 0..count {
-            pc.card(ax, y, chip_w, 32.0);
+            let chip = pc.r(ax, y, chip_w, chip_h);
+            let resp = pc.click_area(&format!("chip{}", ch), chip);
+            if resp.hovered() && pc.interactive {
+                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            pc.card(ax, y, chip_w, chip_h);
             let lab = format!("채널 {}", ch + 1);
-            let lab_w = pc.measure_gdi(&lab, 8.0, true);
-            pc.text(ax + 10.0, y + 8.0, &lab, 8.0, true, p.accent);
-            let pen_x = ax + chip_w - 24.0 - 8.0;
+            let lab_w = pc.measure(&lab, 8.0, true);
+            let ty = y + (chip_h - pc.line_h(8.5, false)) / 2.0;
+            pc.text(ax + 10.0, ty, &lab, 8.0, true, p.ink);
+            let pen_x = ax + chip_w - 24.0 - 6.0;
             let al_left = ax + 10.0 + lab_w + 10.0;
             let al_w = (pen_x - al_left - 6.0).max(10.0);
-            pc.text_ellipsis(al_left, y + 8.0, al_w, &cfg.alias_for(ch), 8.5, false, p.ink);
-            let clicked_label = pc.click_area(&format!("al{}", ch), pc.r(al_left, y + 8.0, al_w, 18.0)).clicked() && pc.interactive;
-            if pc.button(&format!("pen{}", ch), pen_x, y + 5.0, 24.0, 22.0, "", Some(Icon::Pencil), Variant::Icon, true) || clicked_label {
+            let has_name = cfg.aliases.iter().any(|(c, v)| *c == ch && !v.is_empty());
+            if has_name {
+                pc.text_ellipsis(al_left, ty, al_w, &cfg.alias_for(ch), 8.5, false, p.ink);
+            } else {
+                pc.text_ellipsis(al_left, ty, al_w, "이름 없음", 8.5, false, p.muted);
+            }
+            pc.icon(Icon::Pencil, pen_x + 4.0, y + (chip_h - 16.0) / 2.0, 16.0, p.muted);
+            if resp.clicked() && pc.interactive {
                 self.edit_alias(ch, cfg, p);
             }
-            ax += chip_w + gap;
+            ax += chip_w + GAP;
         }
-        y += 44.0;
+        y += chip_h + 22.0;
 
-        // 등록된 기기.
+        // 기기.
         let sw = switchable(devices);
-        pc.text(24.0, y, &format!("등록된 기기   {}개", sw.len()), 9.5, true, p.ink);
-        y += 26.0;
-        if sw.is_empty() {
-            pc.text(24.0, y, "전환 가능한 기기가 없습니다. [진단]에서 새로 고침 하세요.", 10.0, false, p.muted);
-            y += 28.0;
+        let rescan = if scanning { "찾는 중…" } else { "다시 찾기" };
+        let rw = pc.btn_w(rescan, Some(Icon::Refresh));
+        let lh = pc.line_h(LAB, true);
+        pc.text(x0, y + (bh - lh) / 2.0, &format!("기기   {}개", sw.len()), LAB, true, p.ink);
+        if pc.button("rescan", x0 + w - rw, y, rw, bh, rescan, Some(Icon::Refresh), Variant::Default, !scanning) {
+            self.rescan();
         }
+        y += bh + 4.0;
+        y += pc.wrap(
+            x0,
+            y,
+            w,
+            "연결된 로지텍 마우스·키보드를 자동으로 찾습니다. 「채널 전환」으로 기기 하나만 다른 PC 로 보낼 수 있습니다.",
+            DESC,
+            false,
+            p.muted,
+        );
+        y += 6.0;
+        if sw.is_empty() {
+            y += 4.0;
+            y += pc.wrap(
+                x0,
+                y,
+                w,
+                "찾은 기기가 없습니다. 기기를 켜거나 리시버를 꽂은 뒤 「다시 찾기」를 누르세요.",
+                9.5,
+                false,
+                p.muted,
+            );
+            y += 10.0;
+        }
+        let row_h = (lh.max(bh) + 16.0).max(44.0);
         for (i, d) in sw.iter().enumerate() {
-            let ox = 24.0;
+            let label = "채널 전환";
+            let bw = pc.btn_w(label, Some(Icon::ChevronDown)) + 10.0;
+            let ch = if d.current_host >= 0 { (d.current_host + 1).to_string() } else { "?".into() };
+            let badge = format!("채널 {}", ch);
+            let badge_h = (pc.line_h(8.5, true) + 4.0).max(24.0);
+            let badge_w = pc.measure_gdi(&badge, 8.5, true) + 20.0;
+            let bx = x0 + w - bw;
+            let badge_x = bx - 12.0 - badge_w;
             pc.icon(
                 if looks_like_keyboard(&d.device_name) { Icon::Keyboard } else { Icon::Mouse },
-                ox + 2.0,
-                y + 13.0,
+                x0 + 2.0,
+                y + (row_h - 18.0) / 2.0,
                 18.0,
                 p.muted,
             );
-            pc.text(ox + 30.0, y + 13.0, &d.device_name, 9.5, false, p.ink);
-            let ch = if d.current_host >= 0 { (d.current_host + 1).to_string() } else { "?".into() };
-            pc.badge(ox + w - 220.0, y + 10.0, 24.0, &format!("채널 {}", ch), false);
-            if pc.button(&format!("sw{}", i), ox + w - 72.0, y + 9.0, 64.0, 26.0, "전환", None, Variant::Default, true) {
-                let anchor = pc.r(ox + w - 72.0, y + 9.0, 64.0, 26.0).left_bottom();
+            let name_lh = pc.line_h(9.5, false);
+            pc.text_ellipsis(
+                x0 + 30.0,
+                y + (row_h - name_lh) / 2.0,
+                badge_x - 12.0 - (x0 + 30.0),
+                &d.device_name,
+                9.5,
+                false,
+                p.ink,
+            );
+            pc.badge(badge_x, y + (row_h - badge_h) / 2.0, badge_h, &badge, false);
+            if pc.button(
+                &format!("sw{}", i),
+                bx,
+                y + (row_h - bh) / 2.0,
+                bw,
+                bh,
+                label,
+                Some(Icon::ChevronDown),
+                Variant::Default,
+                true,
+            ) {
+                let anchor = pc.r(bx, y + (row_h - bh) / 2.0, bw, bh).left_bottom();
                 self.device_switch_menu(ctx, anchor, d, max_host, cfg);
             }
-            pc.hline(ox, y + 43.0, w);
-            y += 44.0;
+            pc.hline(x0, y + row_h - 1.0, w);
+            y += row_h;
         }
-        y += 8.0;
+        y += 22.0;
 
-        // footer
-        let fx = 24.0;
-        pc.hline(fx, y, w);
-        pc.icon(Icon::Edge, fx, y + 16.0, 16.0, p.muted);
-        pc.text(fx + 24.0, y + 15.0, "가장자리 자동 전환", 9.5, true, p.ink);
-        let toggle_x = fx + w - 40.0;
-        let dwell_x = toggle_x - 90.0;
-        pc.text(dwell_x - 30.0, y + 18.0, "대기", 8.5, false, p.muted);
-        if pc.button("dwell", dwell_x, y + 14.0, 78.0, 26.0, &dwell_text(cfg.dwell_ms), None, Variant::Default, true) {
-            let anchor = pc.r(dwell_x, y + 14.0, 78.0, 26.0).left_bottom();
+        // 가장자리 자동 전환(이 화면에만 둔다 — 배치와 함께 쓰는 설정).
+        y = section(pc, y, "가장자리 자동 전환");
+        let slot = pc.card_begin();
+        let top = y;
+        let (hit, h) = toggle_row(
+            pc,
+            "edge",
+            x0,
+            y,
+            w,
+            Line::new(
+                "가장자리 자동 전환",
+                "붙여 둔 가장자리로 커서를 밀면 그 채널로 넘어갑니다. 끄면 트레이 메뉴나 「채널 전환」으로만 넘깁니다.",
+            ),
+            cfg.edge_switch_enabled,
+        );
+        if hit {
+            self.apply(|c| c.edge_switch_enabled = !c.edge_switch_enabled);
+        }
+        y += h;
+        divider(pc, x0, y, w);
+        let dwell_lab = dwell_text(cfg.dwell_ms);
+        let (hit, h) = buttons_row(
+            pc,
+            "dwell",
+            x0,
+            y,
+            w,
+            Line::new(
+                "머무는 시간",
+                "가장자리에서 이만큼 밀고 있어야 넘어갑니다. 짧으면 빨리 넘어가고, 길면 실수로 넘어가는 일이 줄어듭니다. 기본 0.33초.",
+            ),
+            &[(&dwell_lab, Some(Icon::ChevronDown), Variant::Default)],
+        );
+        if hit.is_some() {
+            let bw = pc.btn_w(&dwell_lab, Some(Icon::ChevronDown));
+            let anchor = pc.r(x0 + w - PX - bw, y + (h + bh) / 2.0, bw, 0.0).left_top();
             let opts = [200, 330, 500, 800, 1000];
             let items: Vec<notify::MenuItem> = opts
                 .iter()
                 .enumerate()
                 .map(|(i, ms)| notify::MenuItem::Item {
                     id: 100 + i as u32,
-                    text: dwell_text(*ms),
+                    text: if *ms == logiflow_core::edge::DEFAULT_DWELL_MS {
+                        format!("{} (기본)", dwell_text(*ms))
+                    } else {
+                        dwell_text(*ms)
+                    },
                     enabled: true,
                 })
                 .collect();
@@ -452,25 +763,54 @@ impl SettingsApp {
                 self.apply(|c| c.dwell_ms = v);
             }
         }
-        if pc.toggle("edge", toggle_x, y + 20.0, cfg.edge_switch_enabled) {
-            self.apply(|c| c.edge_switch_enabled = !c.edge_switch_enabled);
-        }
-        if pc.toggle("guard", fx, y + 52.0, cfg.drag_guard) {
+        y += h;
+        divider(pc, x0, y, w);
+        let (hit, h) = toggle_row(
+            pc,
+            "guard",
+            x0,
+            y,
+            w,
+            Line::new(
+                "끌기 중 전환 막기",
+                "마우스 단추를 누른 채 창이나 파일을 끌고 있을 때는 가장자리에 닿아도 넘어가지 않습니다.",
+            ),
+            cfg.drag_guard,
+        );
+        if hit {
             self.apply(|c| c.drag_guard = !c.drag_guard);
         }
-        pc.text(fx + 50.0, y + 56.0, "드래그 중 전환 안 함", 8.5, false, p.ink);
-        if pc.button("reset", fx + w - 90.0, y + 54.0, 90.0, 26.0, "배치 초기화", None, Variant::Ghost, true) {
-            let att = self.canvas.clear_placements();
-            self.apply(|c| c.attachments = att);
+        y += h;
+        // 지우는 동작은 맨 아래 따로.
+        if !cfg.attachments.is_empty() {
+            divider(pc, x0, y, w);
+            let (hit, h) = buttons_row(
+                pc,
+                "reset",
+                x0,
+                y,
+                w,
+                Line::new("배치 초기화", "모든 채널 상자를 모니터에서 떼어 아래 줄로 돌려놓습니다."),
+                &[("초기화", None, Variant::Default)],
+            );
+            if hit.is_some()
+                && self.ask(
+                    "채널 배치를 모두 지울까요?\r\n모든 채널 상자가 모니터에서 떨어져 아래 줄로 돌아갑니다.\r\n바로 「되돌리기」로 되살릴 수 있습니다.",
+                    "배치 초기화",
+                )
+            {
+                let att = self.canvas.clear_placements();
+                self.set_layout(cfg, att);
+            }
+            y += h;
         }
-        y += 86.0 + 20.0;
-        y
+        pc.card_end(slot, x0, top, w, y - top);
+        y + 28.0
     }
 
     fn edit_alias(&mut self, ch: i32, cfg: &AppConfig, p: &Palette) {
-        let Some(h) = self.hwnd else { return };
-        let cur = cfg.alias_for(ch);
-        if let Some(v) = prompt::show(h, "채널 별칭", &format!("채널 {} 의 별칭", ch + 1), &cur, p.content, p.ink) {
+        let cur = cfg.aliases.iter().find(|(c, _)| *c == ch).map(|(_, v)| v.clone()).unwrap_or_default();
+        if let Some(v) = self.prompt("채널 이름", &format!("채널 {} 의 이름 (비우면 「채널 {}」)", ch + 1, ch + 1), &cur, p) {
             self.apply(|c| c.set_alias(ch, &v));
         }
     }
@@ -484,7 +824,7 @@ impl SettingsApp {
             }
             items.push(notify::MenuItem::Item {
                 id: 200 + h as u32,
-                text: format!("채널 {} · {}", h + 1, cfg.alias_for(h)),
+                text: cfg.channel_label(h),
                 enabled: true,
             });
         }
@@ -502,12 +842,11 @@ impl SettingsApp {
                 return;
             }
             let q = format!(
-                "{} 를 채널 {} ({}) 로 전환합니다.\r\n이 PC 에서 기기가 사라집니다. 진행할까요?",
+                "{} 을(를) {}(으)로 전환할까요?\r\n전환하면 이 PC 에서는 이 기기를 쓸 수 없습니다.",
                 d.device_name,
-                target + 1,
-                cfg.alias_for(target)
+                cfg.channel_label(target)
             );
-            if self.msg(&q, "LogiFlow 전환", MB_YESNO | MB_ICONWARNING) != IDYES {
+            if self.msg(&q, "채널 전환", MB_YESNO | MB_ICONWARNING) != IDYES {
                 return;
             }
             self.busy = true;
@@ -519,38 +858,38 @@ impl SettingsApp {
 
     // ================= 설정 =================
     fn settings_page(&mut self, pc: &Pc<'_>, ctx: &egui::Context, vw: f32, cfg: &AppConfig, clip_running: bool) -> f32 {
-        let _ = ctx;
         let p = pc.pal;
         let w = cw(vw);
-        let mut y = 20.0;
-        pc.text(24.0, y, "설정", 14.0, true, p.ink);
-        pc.text(24.0, y + 28.0, "실행과 로그를 관리", 9.0, false, p.muted);
-        y += 60.0;
+        let cx = 24.0;
+        let mut y = page_header(pc, w, "설정", "앱 모양과 실행 방식, 클립보드 공유를 정합니다.");
 
         // 모양
-        pc.text(24.0, y, "모양", 8.0, true, p.muted);
-        y += 22.0;
-        let cx = 24.0;
-        pc.card(cx, y, w, 132.0);
-        row_label(pc, cx + 16.0, y + 16.0, "테마", "시스템 설정을 따르거나 라이트·다크로 고정합니다.");
+        y = section(pc, y, "모양");
+        let slot = pc.card_begin();
+        let top = y;
+        let seg_w = 224.0;
+        let seg_h = (pc.line_h(10.0, false) + 14.0).max(34.0);
+        let h = row_text(pc, cx, y, w, seg_w, &Line::new("테마", "시스템 설정을 따르거나 라이트·다크로 고정합니다."));
         if let Some(i) = pc.segmented(
             "theme",
-            cx + w - 246.0,
-            y + 17.0,
-            224.0,
-            34.0,
+            cx + w - PX - seg_w,
+            y + (h - seg_h) / 2.0,
+            seg_w,
+            seg_h,
             &["시스템", "라이트", "다크"],
             cfg.theme as usize,
         ) {
             self.apply(|c| c.theme = ThemeMode::from_i32(i as i32).unwrap_or_default());
         }
-        pc.hline(cx + 16.0, y + 66.0, w - 32.0);
-        row_label(
+        y += h;
+        divider(pc, cx, y, w);
+        let h = row_text(
             pc,
-            cx + 16.0,
-            y + 82.0,
-            "글자 크기",
-            "보통이 기본입니다. 작은 글자가 안 보이면 크게로 키우세요.",
+            cx,
+            y,
+            w,
+            seg_w,
+            &Line::new("글자 크기", "보통이 기본입니다. 글자가 작아 보이면 크게로 바꾸세요."),
         );
         let font_idx = if cfg.font_offset >= 3 {
             2
@@ -559,7 +898,15 @@ impl SettingsApp {
         } else {
             1
         };
-        if let Some(i) = pc.segmented("font", cx + w - 246.0, y + 83.0, 224.0, 34.0, &["작게", "보통", "크게"], font_idx) {
+        if let Some(i) = pc.segmented(
+            "font",
+            cx + w - PX - seg_w,
+            y + (h - seg_h) / 2.0,
+            seg_w,
+            seg_h,
+            &["작게", "보통", "크게"],
+            font_idx,
+        ) {
             let off = match i {
                 2 => 3,
                 0 => -1,
@@ -567,229 +914,250 @@ impl SettingsApp {
             };
             self.apply(|c| c.font_offset = off);
         }
-        y += 132.0 + 16.0;
+        y += h;
+        pc.card_end(slot, cx, top, w, y - top);
+        y += 18.0;
 
         // 실행
-        pc.text(24.0, y, "실행", 8.0, true, p.muted);
-        y += 22.0;
-        pc.card(cx, y, w, 120.0);
-        if setting_row(
+        y = section(pc, y, "실행");
+        let slot = pc.card_begin();
+        let top = y;
+        let (hit, h) = toggle_row(
             pc,
             "autostart",
             cx,
             y,
             w,
-            0.0,
-            "Windows 시작 시 실행",
-            "로그인하면 트레이에 자동으로 상주합니다.",
-            false,
+            Line::new("Windows 시작 시 실행", "Windows 에 로그인하면 LogiFlow 가 알림 영역에서 자동으로 시작합니다."),
             cfg.auto_start,
-        ) {
+        );
+        if hit {
             self.apply(|c| c.auto_start = !c.auto_start);
         }
+        y += h;
+        divider(pc, cx, y, w);
         let installed = *self.prelogon_installed.lock().unwrap();
-        if setting_row(
+        let (hit, h) = toggle_row(
             pc,
             "prelogon",
             cx,
             y,
             w,
-            60.0,
-            "로그온 전에도 실행",
-            "로그인/잠금 화면에서도 가장자리로 밀면 전환됩니다(부팅 시 SYSTEM 작업 · 관리자 권한). [전환 관리]에서 붙인 채널 배치를 씁니다.",
-            true,
+            Line::new(
+                "로그인 전에도 실행",
+                "PC 를 켠 직후의 로그인 화면과 잠금 화면에서도 가장자리로 밀면 넘어갑니다. 켜고 끌 때 관리자 승인이 필요하고, 「전환 관리」의 채널 배치를 그대로 씁니다.",
+            )
+            .advanced(),
             installed,
-        ) {
+        );
+        if hit {
             self.toggle_prelogon(!installed, cfg);
         }
-        y += 120.0 + 16.0;
+        y += h;
+        pc.card_end(slot, cx, top, w, y - top);
+        y += 18.0;
 
-        // 전환 · 진단
-        pc.text(24.0, y, "전환 · 진단", 8.0, true, p.muted);
-        y += 22.0;
-        pc.card(cx, y, w, 180.0);
-        if setting_row(
-            pc,
-            "edge2",
-            cx,
-            y,
-            w,
-            0.0,
-            "가장자리 자동 전환 사용",
-            "모니터 변에 붙인 채널로 커서를 밀면 자동 전환합니다.",
-            false,
-            cfg.edge_switch_enabled,
-        ) {
-            self.apply(|c| c.edge_switch_enabled = !c.edge_switch_enabled);
-        }
-        if setting_row(
-            pc,
-            "diaglog",
-            cx,
-            y,
-            w,
-            60.0,
-            "진단 로그 남기기",
-            "엣지 판정·전환 트리거를 로그 폴더에 기록합니다.",
-            false,
-            cfg.diag_log_enabled,
-        ) {
-            self.apply(|c| c.diag_log_enabled = !c.diag_log_enabled);
-        }
-        if setting_row(
-            pc,
-            "debug",
-            cx,
-            y,
-            w,
-            120.0,
-            "상세 디버그 로그",
-            "로그온 전환 워커가 커서·엣지별 거리·dwell 을 상세 기록(안 될 때 원인 추적). 켜면 몇 초 뒤 반영.",
-            true,
-            cfg.debug_mode,
-        ) {
-            self.apply(|c| c.debug_mode = !c.debug_mode);
-        }
-        y += 180.0 + 16.0;
-
-        // 클립보드 공유
-        pc.text(24.0, y, "클립보드 공유", 8.0, true, p.muted);
-        y += 22.0;
-        pc.card(cx, y, w, 240.0);
-        if setting_row(
+        // 클립보드 공유 — 꺼져 있으면 켜기 줄만(아래 설정은 접힘).
+        y = section(pc, y, "클립보드 공유");
+        let slot = pc.card_begin();
+        let top = y;
+        let (hit, h) = toggle_row(
             pc,
             "clip",
             cx,
             y,
             w,
-            0.0,
-            "클립보드 공유 사용",
-            "상대 PC 와 텍스트·이미지 클립보드를 주고받습니다(LAN 직접 연결).",
-            false,
+            Line::new(
+                "클립보드 공유",
+                "같은 네트워크에 있는 상대 PC 한 대와 복사한 글·이미지를 주고받습니다. 두 PC 모두 LogiFlow 를 켜 두고 같은 암호문구를 넣어야 합니다.",
+            ),
             cfg.clip_enabled,
-        ) {
+        );
+        if hit {
             self.apply(|c| c.clip_enabled = !c.clip_enabled);
         }
-        let host_v = if cfg.clip_peer_host.is_empty() {
-            "미설정".to_string()
-        } else {
-            cfg.clip_peer_host.clone()
-        };
-        if value_row(
-            pc,
-            "peer",
-            cx,
-            y,
-            w,
-            60.0,
-            "상대 PC 주소",
-            &format!("포트 {} · 양쪽 방화벽 허용 필요", cfg.clip_port),
-            &host_v,
-        ) {
-            if let Some(h) = self.hwnd {
-                if let Some(v) = prompt::show(h, "상대 PC 주소", "상대 PC 의 IP 또는 호스트명", &cfg.clip_peer_host, p.content, p.ink) {
-                    let v = logiflow_core::clip::norm(&v);
+        y += h;
+        if cfg.clip_enabled {
+            // 상대 PC 주소
+            divider(pc, cx, y, w);
+            let empty = cfg.clip_peer_host.is_empty();
+            let line = Line::new("상대 PC 주소", "상대 PC 의 「이 PC 주소」를 넣습니다. 「바꾸기」에서 비우면 지워집니다.");
+            let line = if empty {
+                line.value("아직 없음", p.warn)
+            } else {
+                line.value(cfg.clip_peer_host.clone(), p.ink)
+            };
+            let (hit, h) = buttons_row(pc, "peer", cx, y, w, line, &[(if empty { "입력" } else { "바꾸기" }, None, Variant::Default)]);
+            if hit.is_some() {
+                if let Some(v) = self.prompt("상대 PC 주소", "상대 PC 의 「이 PC 주소」 (예: 192.168.0.20)", &cfg.clip_peer_host, p) {
                     self.apply(|c| c.clip_peer_host = v);
                 }
             }
-        }
-        let sec_v = if cfg.clip_secret.is_empty() { "미설정" } else { "설정됨" };
-        if value_row(pc, "secret", cx, y, w, 120.0, "암호문구", "양쪽 PC 에 같은 값 — 틀리면 전달 안 됨", sec_v) {
-            if let Some(h) = self.hwnd {
-                if let Some(v) = prompt::show(h, "암호문구", "양쪽 PC 동일하게 입력 (비우면 끔)", &cfg.clip_secret, p.content, p.ink) {
-                    let v = logiflow_core::clip::norm(&v);
+            y += h;
+            // 암호문구
+            divider(pc, cx, y, w);
+            let empty = cfg.clip_secret.is_empty();
+            let line = Line::new(
+                "암호문구",
+                "두 PC 에 같은 값을 넣습니다. 다르면 주고받지 못합니다. 「바꾸기」에서 비우면 지워집니다.",
+            );
+            let line = if empty {
+                line.value("아직 없음", p.warn)
+            } else {
+                line.value("입력함", p.ink)
+            };
+            let (hit, h) = buttons_row(pc, "secret", cx, y, w, line, &[(if empty { "입력" } else { "바꾸기" }, None, Variant::Default)]);
+            if hit.is_some() {
+                if let Some(v) = self.prompt("암호문구", "두 PC 에 같은 값 (비우면 지워짐)", &cfg.clip_secret, p) {
                     self.apply(|c| c.clip_secret = v);
                 }
             }
-        }
-        // 진단 행
-        let dy = y + 180.0;
-        pc.hline(cx + 16.0, dy, w - 32.0);
-        pc.text_box(
-            cx + 16.0,
-            dy + 7.0,
-            w - 32.0,
-            16.0,
-            &format!("이 PC 주소(상대에 입력): {}", clipboard::local_info(cfg.clip_port)),
-            8.5,
-            false,
-            p.muted,
-        );
-        if pc.button("ctest", cx + 16.0, dy + 28.0, 92.0, 26.0, "연결 테스트", None, Variant::Default, true) {
-            let r = clipboard::test_connect(&cfg.clip_peer_host, cfg.clip_port);
-            self.msg(&r, "연결 테스트", MB_OK | MB_ICONINFORMATION);
-        }
-        if pc.button("csend", cx + 116.0, dy + 28.0, 104.0, 26.0, "테스트 보내기", None, Variant::Default, true) {
-            let r = clipboard::send_test(clip_running, cfg);
-            self.msg(&r, "테스트 보내기", MB_OK | MB_ICONINFORMATION);
-        }
-        if pc.button("cfw", cx + 228.0, dy + 28.0, 96.0, 26.0, "방화벽 허용", None, Variant::Default, true) {
-            let ok = firewall::request_allow(cfg.clip_port);
-            let t = if ok {
-                format!("방화벽 인바운드 허용 규칙을 추가했습니다(포트 {}).", cfg.clip_port)
-            } else {
-                "실패/취소 — 관리자 권한이 필요하고 회사 정책이 막을 수 있습니다.".to_string()
+            y += h;
+            // 이 PC 주소
+            divider(pc, cx, y, w);
+            let ips = clipboard::local_ips();
+            let main_ip = ips.first().cloned();
+            let mut desc = format!("상대 PC 의 「상대 PC 주소」에 이 값을 넣습니다. 포트 {}.", cfg.clip_port);
+            if ips.len() > 1 {
+                desc.push_str(&format!(" 안 되면 다른 주소: {}", ips[1..].join(", ")));
+            }
+            let line = Line::new("이 PC 주소", desc);
+            let line = match &main_ip {
+                Some(ip) => line.value(ip.clone(), p.ink),
+                None => line.value("찾지 못함", p.warn),
             };
-            self.msg(&t, "방화벽 허용", MB_OK | if ok { MB_ICONINFORMATION } else { MB_ICONWARNING });
+            let copied = self.copied_at.map(|t| t.elapsed().as_secs_f32() < 2.0).unwrap_or(false);
+            if copied {
+                ctx.request_repaint_after(std::time::Duration::from_millis(300));
+            }
+            let (hit, h) = if main_ip.is_some() {
+                buttons_row(pc, "copy", cx, y, w, line, &[(if copied { "복사함" } else { "복사" }, None, Variant::Default)])
+            } else {
+                (None, row_text(pc, cx, y, w, 0.0, &line))
+            };
+            if hit.is_some() {
+                if let Some(ip) = main_ip {
+                    ctx.copy_text(ip);
+                    self.copied_at = Some(Instant::now());
+                }
+            }
+            y += h;
+            // 연결 확인(보내 보기)
+            divider(pc, cx, y, w);
+            let (hit, h) = buttons_row(
+                pc,
+                "ctest",
+                cx,
+                y,
+                w,
+                Line::new("연결 확인", "상대 PC 로 시험 글을 한 번 보냅니다. 상대 PC 에서 붙여 넣어 확인하세요."),
+                &[("보내 보기", None, Variant::Default)],
+            );
+            if hit.is_some() {
+                let r = if cfg.clip_peer_host.is_empty() || cfg.clip_secret.is_empty() {
+                    "상대 PC 주소와 암호문구를 먼저 넣어 주세요.".to_string()
+                } else if clip_running {
+                    clipboard::send_test(true, cfg)
+                } else {
+                    format!(
+                        "{}\r\n\r\n이 PC 의 클립보드 공유가 아직 시작되지 않아 시험 글은 보내지 않았습니다.",
+                        clipboard::test_connect(&cfg.clip_peer_host, cfg.clip_port)
+                    )
+                };
+                self.msg(&r, "연결 확인", MB_OK | MB_ICONINFORMATION);
+            }
+            y += h;
+            // Windows 방화벽
+            divider(pc, cx, y, w);
+            let fw = *self.firewall_on.lock().unwrap();
+            let line = Line::new(
+                "Windows 방화벽",
+                format!(
+                    "상대 PC 가 이 PC 로 보내려면 포트 {} 를 열어 두어야 합니다. 바꿀 때 관리자 승인이 필요합니다.",
+                    cfg.clip_port
+                ),
+            );
+            let (hit, h) = match fw {
+                None => (None, row_text(pc, cx, y, w, 0.0, &line.value("확인 중…", p.muted))),
+                Some(true) => buttons_row(pc, "fwoff", cx, y, w, line.value("허용됨", p.ink), &[("허용 해제", None, Variant::Default)]),
+                Some(false) => buttons_row(pc, "fwon", cx, y, w, line.value("허용 안 됨", p.warn), &[("허용", None, Variant::Default)]),
+            };
+            if hit.is_some() {
+                let failed = match fw {
+                    Some(false) => (!firewall::request_allow(cfg.clip_port))
+                        .then_some("허용하지 못했습니다(취소했거나 관리자 승인이 막혔습니다). 회사 관리 PC 는 정책이 막을 수 있습니다."),
+                    Some(true) => (self.ask(
+                        "방화벽 허용을 해제할까요?\r\n해제하면 상대 PC 가 이 PC 로 클립보드를 보내지 못합니다.",
+                        "Windows 방화벽",
+                    ) && !firewall::request_remove())
+                    .then_some("해제하지 못했습니다(취소했거나 관리자 승인이 막혔습니다)."),
+                    None => None,
+                };
+                if let Some(t) = failed {
+                    self.msg(t, "Windows 방화벽", MB_OK | MB_ICONWARNING);
+                }
+                spawn_check(&self.firewall_on, firewall::exists);
+            }
+            y += h;
         }
-        y += 240.0 + 20.0;
+        pc.card_end(slot, cx, top, w, y - top);
+        y += 18.0;
 
         // 정보
-        pc.text(24.0, y, "정보", 8.0, true, p.muted);
-        y += 22.0;
-        pc.card(cx, y, w, 60.0);
-        pc.text(cx + 16.0, y + 12.0, "오픈소스 라이선스", 9.5, true, p.ink);
-        pc.text_box(
-            cx + 16.0,
-            y + 32.0,
-            w - 120.0,
-            18.0,
-            "LogiFlow 와 사용된 구성요소의 라이선스(MIT).",
-            8.5,
-            false,
-            p.muted,
+        y = section(pc, y, "정보");
+        let slot = pc.card_begin();
+        let top = y;
+        let (hit, h) = buttons_row(
+            pc,
+            "lic",
+            cx,
+            y,
+            w,
+            Line::new("오픈소스 라이선스", "LogiFlow 와 함께 쓰인 구성 요소의 라이선스입니다."),
+            &[("보기", None, Variant::Ghost)],
         );
-        if pc.button("lic", cx + w - 80.0, y + 17.0, 64.0, 26.0, "보기", None, Variant::Default, true) {
+        if hit.is_some() {
             self.license = true;
             self.license_offset = 0.0;
         }
-        y += 60.0 + 20.0;
-        y
+        y += h;
+        pc.card_end(slot, cx, top, w, y - top);
+        y + 28.0
     }
 
     fn toggle_prelogon(&mut self, on: bool, cfg: &AppConfig) {
         if on {
             if cfg.attachments.is_empty() {
                 self.msg(
-                    "먼저 [전환 관리]에서 모니터 변에 채널을 붙여 주세요. 그 배치를 잠금/로그인 화면에서도 씁니다.",
-                    "LogiFlow",
+                    "먼저 「전환 관리」에서 채널 상자를 모니터 가장자리에 붙여 주세요. 그 배치를 로그인·잠금 화면에서도 씁니다.",
+                    "로그인 전에도 실행",
                     MB_OK | MB_ICONINFORMATION,
                 );
                 return;
             }
-            // 지금 판과 다른 점(시험판): C# 판 서비스와 함께 돌면 로그온 화면에서 두 번 전환된다.
+            // 시험판 한정: C# 판 서비스와 함께 돌면 로그인 화면에서 두 번 전환된다.
             if legacy::csharp_service_exists() {
                 self.msg(
                     "기존 LogiFlow(C# 판)의 「로그온 전에도 실행」이 켜져 있습니다.\r\n두 판이 함께 전환하지 않도록, 기존 LogiFlow 에서 먼저 끈 뒤 다시 켜 주세요.",
-                    "LogiFlow",
+                    "로그인 전에도 실행",
                     MB_OK | MB_ICONINFORMATION,
                 );
                 return;
             }
-            let modal = Modal::new("로그온 전에도 실행 — 켜는 중");
+            let modal = Modal::new("로그인 전에도 실행 — 켜는 중");
             let (step, fin, after) = (modal.step.clone(), modal.finished.clone(), modal.pre_logon_after.clone());
             let cfg2 = cfg.clone();
             std::thread::spawn(move || {
                 *step.lock().unwrap() = "채널 배치 저장 중…".into();
                 tray::write_logon_edges(&cfg2); // 머신 공유 엣지 설정 먼저
-                *step.lock().unwrap() = "관리자 권한 요청 → 서비스 등록 중…\r\nUAC 창이 뜨면 '예'를 눌러 주세요.".into();
+                *step.lock().unwrap() = "관리자 승인을 요청하는 중…\r\n승인 창이 뜨면 「예」를 눌러 주세요.".into();
                 let ok = prelogon::request_enable(cfg2.my_host);
                 *after.lock().unwrap() = Some(ok);
                 *fin.lock().unwrap() = Some((
                     if ok {
-                        "로그온 전에도 실행을 켰습니다.\r\n이제 콜드부팅·로그인·잠금 화면에서 가장자리로 밀면 전환됩니다(서비스 상주).\r\n\r\n※ 리시버/동글이 이 PC 에 있어야 하고, 콜드부팅 로그온 화면에선 마우스를 한 번 흔들어 깨운 뒤 미세요(키보드는 아무 키나 한 번).".into()
+                        "로그인 전에도 실행을 켰습니다.\r\n이제 PC 를 켠 직후의 로그인 화면과 잠금 화면에서도 가장자리로 밀면 넘어갑니다.\r\n\r\n리시버가 이 PC 에 꽂혀 있어야 합니다. 로그인 화면에서는 마우스를 한 번 움직여(키보드는 아무 키나 한 번) 깨운 뒤 미세요.".into()
                     } else {
-                        "켜기가 취소되었거나 실패했습니다.\r\n관리자 권한(UAC)이 필요하며, 회사 관리 PC 정책이 막을 수 있습니다.".into()
+                        "켜지 못했습니다(취소했거나 관리자 승인이 막혔습니다).\r\n회사 관리 PC 는 정책이 막을 수 있습니다.".into()
                     },
                     !ok,
                 ));
@@ -802,10 +1170,10 @@ impl SettingsApp {
                 self.apply(|c| c.pre_logon = false);
                 return;
             }
-            let modal = Modal::new("로그온 전에도 실행 — 끄는 중");
+            let modal = Modal::new("로그인 전에도 실행 — 끄는 중");
             let (step, fin, after) = (modal.step.clone(), modal.finished.clone(), modal.pre_logon_after.clone());
             std::thread::spawn(move || {
-                *step.lock().unwrap() = "관리자 권한 요청 → 서비스 제거 중…\r\nUAC 창이 뜨면 '예'를 눌러 주세요.".into();
+                *step.lock().unwrap() = "관리자 승인을 요청하는 중…\r\n승인 창이 뜨면 「예」를 눌러 주세요.".into();
                 let ok_msg = prelogon::request_disable();
                 tray::remove_logon_edges();
                 // 삭제 성공을 낙관하지 말고 실제 서비스 상태를 재조회.
@@ -814,9 +1182,9 @@ impl SettingsApp {
                 *after.lock().unwrap() = Some(still);
                 *fin.lock().unwrap() = Some((
                     if good {
-                        "로그온 전에도 실행을 껐습니다.".into()
+                        "로그인 전에도 실행을 껐습니다.".into()
                     } else {
-                        "제거가 취소되었거나 실패했습니다(관리자 권한 필요).".into()
+                        "끄지 못했습니다(취소했거나 관리자 승인이 막혔습니다).".into()
                     },
                     !good,
                 ));
@@ -831,13 +1199,24 @@ impl SettingsApp {
         let step = m.step.lock().unwrap().clone();
         let fin = m.finished.lock().unwrap().clone();
         let t = m.started.elapsed().as_secs_f32();
-        let pos = center_on(ctx, parent, Vec2::new(440.0, 244.0));
+        // 글 길이·글자 크기에 맞춰 창 높이를 잡는다(글이 잘리지 않게, 최소 244).
+        let body = match &fin {
+            Some((text, _)) => text.clone(),
+            None => step.clone(),
+        };
+        let measure = |s: &str, f: egui::FontId| ctx.fonts_mut(|fx| fx.layout(s.replace("\r\n", "\n"), f, Color32::WHITE, 400.0).size().y);
+        let title_h = measure(&title, crate::paint::font(10.5, off, true));
+        let body_h = measure(&body, crate::paint::font(9.0, off, false));
+        let btn_h = (ctx.fonts_mut(|fx| fx.layout_no_wrap("가".into(), crate::paint::font(9.0, off, false), Color32::WHITE).size().y) + 12.0).max(32.0);
+        let body_y = 16.0 + title_h + 12.0;
+        let height = (body_y + body_h + 24.0 + btn_h + 12.0).max(244.0);
+        let pos = center_on(ctx, parent, Vec2::new(440.0, height));
         let mut close = false;
         ctx.show_viewport_immediate(
             ViewportId::from_hash_of("lf-progress"),
             ViewportBuilder::default()
                 .with_title(title.clone())
-                .with_inner_size([440.0, 244.0])
+                .with_inner_size([440.0, height])
                 .with_resizable(false)
                 .with_close_button(false)
                 .with_minimize_button(false)
@@ -854,12 +1233,12 @@ impl SettingsApp {
                     interactive: true,
                     id_base: Id::unique("modal"),
                 };
-                pc.text_box(20.0, 16.0, 400.0, 24.0, &title, 10.5, true, pal.ink);
+                pc.wrap(20.0, 16.0, 400.0, &title, 10.5, true, pal.ink);
                 match &fin {
                     None => {
-                        pc.text_box(20.0, 48.0, 400.0, 150.0, &step, 9.0, false, pal.muted);
+                        pc.wrap(20.0, body_y, 400.0, &step, 9.0, false, pal.muted);
                         // 진행 막대(Marquee).
-                        let bar = pc.r(20.0, 210.0, 400.0, 10.0);
+                        let bar = pc.r(20.0, height - 12.0 - btn_h / 2.0 - 5.0, 400.0, 10.0);
                         ui.painter().rect_filled(bar, 0, Color32::from_gray(if pal.dark { 60 } else { 230 }));
                         let seg = 100.0;
                         let x = ((t * 160.0) % (400.0 + seg)) - seg;
@@ -871,8 +1250,10 @@ impl SettingsApp {
                         ui.ctx().request_repaint();
                     }
                     Some((text, _err)) => {
-                        pc.text_box(20.0, 48.0, 400.0, 150.0, text, 9.0, false, pal.ink);
-                        if pc.button("ok", 330.0, 202.0, 90.0, 32.0, "확인", None, Variant::Default, true) || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        pc.wrap(20.0, body_y, 400.0, text, 9.0, false, pal.ink);
+                        if pc.button("ok", 330.0, height - 12.0 - btn_h, 90.0, btn_h, "확인", None, Variant::Default, true)
+                            || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        {
                             close = true;
                         }
                     }
@@ -975,151 +1356,286 @@ impl SettingsApp {
     }
 
     // ================= 진단 =================
-    fn diag_page(&mut self, pc: &Pc<'_>, _ctx: &egui::Context, vw: f32, devices: &[ScanResult], scanning: bool) -> f32 {
+    fn diag_page(&mut self, pc: &Pc<'_>, _ctx: &egui::Context, vw: f32, cfg: &AppConfig, devices: &[ScanResult]) -> f32 {
         let p = pc.pal;
         let w = cw(vw);
-        let mut y = 20.0;
-        pc.text(24.0, y, "진단", 14.0, true, p.ink);
-        pc.text(24.0, y + 28.0, "기기별 채널·전환 인덱스 확인", 9.0, false, p.muted);
-        let log_x = 24.0 + w - 126.0;
-        let ref_x = log_x - 10.0 - 108.0;
-        let show_x = ref_x - 10.0 - 40.0;
-        let lab_w = pc.measure_gdi("모두 보기", 9.0, false);
-        pc.text(show_x - 6.0 - lab_w, y + 6.0, "모두 보기", 9.0, false, p.ink);
-        if pc.toggle("showall", show_x, y + 3.0, self.show_all) {
-            self.show_all = !self.show_all;
-        }
-        if pc.button(
-            "refresh",
-            ref_x,
-            y,
-            108.0,
-            28.0,
-            if scanning { "스캔 중…" } else { "새로 고침" },
-            Some(Icon::Refresh),
-            Variant::Default,
-            !scanning,
-        ) {
-            self.rescan();
-        }
-        if pc.button("logdir", log_x, y, 126.0, 28.0, "로그 폴더 열기", Some(Icon::Folder), Variant::Default, true) {
-            let dir = logiflow_win::util::exe_dir().join("logs");
-            let _ = std::fs::create_dir_all(&dir);
-            logiflow_win::util::open_with("explorer.exe", &dir);
-        }
-        y += 58.0;
+        let x0 = 24.0;
+        let mut y = page_header(pc, w, "진단", "기기 연결 상태와 기록을 확인합니다. 잘 안 될 때 원인을 찾는 데 씁니다.");
 
-        let shown: Vec<&ScanResult> = devices.iter().filter(|r| self.show_all || r.change_host_supported).collect();
-        let sw = switchable(devices).len();
-        pc.text(24.0, y, &format!("스캔된 기기   전환 가능 {}개", sw), 9.5, true, p.ink);
-        y += 24.0;
-        // 머리 줄
-        let cols = [
-            ("기기", 0.0, 0.30),
-            ("VID:PID", 0.30, 0.18),
-            ("연결", 0.48, 0.22),
-            ("0x1814 인덱스", 0.70, 0.18),
-            ("채널", 0.88, 0.12),
-        ];
-        for (t, x, cwid) in cols {
-            pc.text_box(24.0 + (w * x).floor(), y + 4.0, (w * cwid).floor(), 18.0, t, 8.0, true, p.muted);
+        // 기기 상세 — 진단 전용 정보만(채널·전환 단추는 「전환 관리」).
+        let shown: Vec<&ScanResult> = devices.iter().filter(|r| self.detail || r.change_host_supported).collect();
+        let lh = pc.line_h(LAB, true);
+        let tog_lab_w = pc.measure("자세히", 9.0, false);
+        pc.text(x0, y + (22.0 - lh).max(0.0) / 2.0, &format!("기기 상세   {}개", shown.len()), LAB, true, p.ink);
+        let tx = x0 + w - 40.0;
+        pc.text(tx - 8.0 - tog_lab_w, y + (22.0 - pc.line_h(9.0, false)) / 2.0, "자세히", 9.0, false, p.ink);
+        if pc.toggle("detail", tx, y, self.detail) {
+            self.detail = !self.detail;
         }
-        pc.hline(24.0, y + 25.0, w);
-        y += 28.0;
+        y += lh.max(22.0) + 4.0;
+        y += pc.wrap(
+            x0,
+            y,
+            w,
+            "기기 목록은 저장해 두고, 기기를 꽂거나 뺄 때와 「전환 관리」의 「다시 찾기」를 누를 때 새로 찾습니다. 「자세히」를 켜면 채널 전환이 안 되는 장치와 제품 번호까지 보입니다.",
+            DESC,
+            false,
+            p.muted,
+        );
+        y += 10.0;
+        let cols: &[(&str, f32)] = if self.detail {
+            &[("기기", 0.30), ("연결", 0.24), ("제품 번호", 0.18), ("전환 기능", 0.28)]
+        } else {
+            &[("기기", 0.42), ("연결", 0.32), ("채널 전환", 0.26)]
+        };
+        let col_x = |i: usize| -> f32 { cols[..i].iter().map(|c| c.1).sum::<f32>() };
+        let head_h = cols.iter().map(|(t, f)| pc.wrap_h(t, 8.0, true, (w * f).floor() - 8.0)).fold(0.0f32, f32::max);
+        for (i, (t, f)) in cols.iter().enumerate() {
+            pc.wrap(x0 + (w * col_x(i)).floor(), y + 4.0, (w * f).floor() - 8.0, t, 8.0, true, p.muted);
+        }
+        y += head_h + 10.0;
+        pc.hline(x0, y - 1.0, w);
         if shown.is_empty() {
-            pc.text(24.0, y, "표시할 기기가 없습니다. [새로 고침] 하세요.", 10.0, false, p.muted);
-            y += 30.0;
+            y += 10.0;
+            y += pc.wrap(x0, y, w, "표시할 기기가 없습니다.", 9.5, false, p.muted);
+            y += 10.0;
         }
         for r in shown {
-            let ox = 24.0;
+            let cells: Vec<(String, Rgb)> = if self.detail {
+                vec![
+                    (r.device_name.clone(), p.ink),
+                    (connection_text(&r.connection_type), p.ink),
+                    (r.vid_pid.clone(), p.muted),
+                    (
+                        if r.change_host_supported {
+                            format!("가능 · 0x{:02X}", r.change_host_index)
+                        } else {
+                            "안 됨".into()
+                        },
+                        if r.change_host_supported { p.ink } else { p.muted },
+                    ),
+                ]
+            } else {
+                vec![
+                    (r.device_name.clone(), p.ink),
+                    (connection_text(&r.connection_type), p.ink),
+                    (
+                        if r.change_host_supported { "가능".into() } else { "안 됨".into() },
+                        if r.change_host_supported { p.ink } else { p.muted },
+                    ),
+                ]
+            };
+            // 칸마다 줄바꿈 — 줄 높이는 가장 긴 칸에 맞춘다.
+            let cell_w = |i: usize| (w * cols[i].1).floor() - 8.0 - if i == 0 { 26.0 } else { 0.0 };
+            let ch = cells
+                .iter()
+                .enumerate()
+                .map(|(i, (t, _))| pc.wrap_h(t, 9.0, false, cell_w(i)))
+                .fold(0.0f32, f32::max);
+            let row_h = ch + 20.0;
             pc.icon(
                 if looks_like_keyboard(&r.device_name) { Icon::Keyboard } else { Icon::Mouse },
-                ox,
-                y + 11.0,
+                x0,
+                y + 10.0 + (pc.line_h(9.0, false) - 17.0) / 2.0,
                 17.0,
                 p.muted,
             );
-            pc.text_box(ox + 26.0, y + 11.0, (w * 0.30).floor() - 26.0, 18.0, &r.device_name, 9.0, false, p.ink);
-            pc.text_box(ox + (w * 0.30).floor(), y + 11.0, (w * 0.18).floor(), 18.0, &r.vid_pid, 9.0, false, p.muted);
-            pc.text_box(
-                ox + (w * 0.48).floor(),
-                y + 11.0,
-                (w * 0.22).floor(),
-                18.0,
-                &r.connection_type,
-                9.0,
-                false,
-                p.ink,
-            );
-            let idx = if r.change_host_supported {
-                format!("0x{:02X}", r.change_host_index)
-            } else {
-                "미지원".into()
-            };
-            pc.text_box(ox + (w * 0.70).floor(), y + 11.0, (w * 0.18).floor(), 18.0, &idx, 9.0, false, p.ink);
-            let ch = if r.current_host >= 0 {
-                format!("채널 {}", r.current_host + 1)
-            } else {
-                "-".into()
-            };
-            pc.badge(ox + (w * 0.88).floor(), y + 8.0, 22.0, &ch, false);
-            pc.hline(ox, y + 39.0, w);
-            y += 40.0;
+            for (i, (t, col)) in cells.iter().enumerate() {
+                let cx = x0 + (w * col_x(i)).floor() + if i == 0 { 26.0 } else { 0.0 };
+                pc.wrap(cx, y + 10.0, cell_w(i), t, 9.0, false, *col);
+            }
+            pc.hline(x0, y + row_h - 1.0, w);
+            y += row_h;
         }
-        y += 6.0;
-        pc.icon(Icon::Plug, 24.0, y + 1.0, 14.0, p.muted);
-        pc.text(
-            44.0,
-            y,
-            "기기 정보는 저장되어 매번 재검색하지 않음 · \"모두 보기\"를 켜면 빈 슬롯·리시버도 함께 표시",
-            8.5,
-            false,
-            p.muted,
-        );
-        y += 40.0;
-
-        pc.text(24.0, y, "로그온 화면 접근 테스트 (실험 · 읽기 전용)", 8.0, true, p.muted);
         y += 24.0;
-        if pc.button("pinstall", 24.0, y, 140.0, 30.0, "테스트 설치·실행", None, Variant::Primary, true) {
-            let ok = probe::request_install_run();
-            self.msg(
-                if ok {
-                    "테스트를 설치하고 지금 SYSTEM 으로 실행했습니다(약 2분).\r\n\r\n① 바로 Win+L 로 잠금화면에 가서 마우스를 20~30초 움직이세요.\r\n② 로그인해 돌아와 [로그 열기]를 누르세요.\r\n③ desktop=\"Winlogon\" 줄의 GetCursorPos 가 성공이면 로그인 화면 전환 구현 가능입니다."
-                } else {
-                    "설치가 취소되었거나 실패했습니다.\r\n관리자 권한(UAC)이 필요하며, 회사 관리 PC 정책이 SYSTEM 작업 생성을 막으면 여기서 실패합니다(그 자체가 '정책상 불가' 판정)."
-                },
-                "LogiFlow 로그온 화면 테스트",
-                MB_OK | if ok { MB_ICONINFORMATION } else { MB_ICONWARNING },
-            );
-        }
-        if pc.button("popen", 24.0 + 148.0, y, 104.0, 30.0, "로그 열기", Some(Icon::Folder), Variant::Default, true) {
-            probe::open_log(self.owner());
-        }
-        if pc.button("premove", 24.0 + 148.0 + 112.0, y, 70.0, 30.0, "제거", None, Variant::Ghost, true) {
-            let ok = probe::request_uninstall();
-            self.msg(
-                if ok {
-                    "테스트를 제거했습니다."
-                } else {
-                    "제거가 취소되었거나 실패했습니다."
-                },
-                "LogiFlow",
-                MB_OK | if ok { MB_ICONINFORMATION } else { MB_ICONWARNING },
-            );
-        }
-        y += 38.0;
-        pc.text_box(
-            24.0,
+
+        // 기록 — 남기기 설정과 파일 다루기를 한곳에.
+        y = section(pc, y, "기록");
+        let slot = pc.card_begin();
+        let top = y;
+        let (hit, h) = toggle_row(
+            pc,
+            "diaglog",
+            x0,
             y,
             w,
-            54.0,
-            "관리자 승인(UAC) 후 SYSTEM 으로 실행됩니다. 바로 Win+L 로 잠금화면에 가서 마우스를 20~30초 움직인 뒤 돌아와 [로그 열기]. desktop=\"Winlogon\" 줄의 GetCursorPos 가 성공(좌표가 바뀜)이면 로그인 화면 엣지 전환 구현이 가능합니다. 이 테스트는 읽기만 하고 마우스·키보드를 전환하지 않습니다.",
-            8.5,
+            Line::new(
+                "진단 기록 남기기",
+                "가장자리 감지와 전환 기록을 파일로 남깁니다. 문제가 생기면 이 파일을 보내 주세요.",
+            ),
+            cfg.diag_log_enabled,
+        );
+        if hit {
+            self.apply(|c| c.diag_log_enabled = !c.diag_log_enabled);
+        }
+        y += h;
+        divider(pc, x0, y, w);
+        let (hit, h) = toggle_row(
+            pc,
+            "debug",
+            x0,
+            y,
+            w,
+            Line::new(
+                "상세 기록",
+                "로그인 화면에서 넘어가지 않을 때 원인을 찾도록 커서 위치까지 자세히 남깁니다. 켜면 몇 초 뒤부터 남습니다.",
+            )
+            .advanced(),
+            cfg.debug_mode,
+        );
+        if hit {
+            self.apply(|c| c.debug_mode = !c.debug_mode);
+        }
+        y += h;
+        divider(pc, x0, y, w);
+        let (hit, h) = buttons_row(
+            pc,
+            "logdir",
+            x0,
+            y,
+            w,
+            Line::new("기록 폴더", "LogiFlow 가 설치된 폴더 안 logs 폴더에 있습니다."),
+            &[("폴더 열기", Some(Icon::Folder), Variant::Default)],
+        );
+        if hit.is_some() {
+            let dir = log_dir();
+            let _ = std::fs::create_dir_all(&dir);
+            logiflow_win::util::open_with("explorer.exe", &dir);
+        }
+        y += h;
+        if has_logs() {
+            divider(pc, x0, y, w);
+            let (hit, h) = buttons_row(
+                pc,
+                "logdel",
+                x0,
+                y,
+                w,
+                Line::new("기록 지우기", "지금까지 남긴 기록 파일을 지웁니다."),
+                &[("지우기", None, Variant::Default)],
+            );
+            if hit.is_some() && self.ask("기록 파일을 모두 지울까요?\r\n지운 기록은 되살릴 수 없습니다.", "기록 지우기") {
+                let mut left = 0;
+                if let Ok(rd) = std::fs::read_dir(log_dir()) {
+                    for e in rd.flatten() {
+                        if std::fs::remove_file(e.path()).is_err() {
+                            left += 1;
+                        }
+                    }
+                }
+                if left > 0 {
+                    self.msg(
+                        &format!("{}개 파일은 지금 쓰는 중이라 지우지 못했습니다. 잠시 뒤 다시 해 보세요.", left),
+                        "기록 지우기",
+                        MB_OK | MB_ICONWARNING,
+                    );
+                }
+            }
+            y += h;
+        }
+        pc.card_end(slot, x0, top, w, y - top);
+        y += 18.0;
+
+        // 로그인 화면 테스트(읽기 전용 — 마우스·키보드를 넘기지 않음).
+        y = section(pc, y, "로그인 화면 테스트");
+        let slot = pc.card_begin();
+        let top = y;
+        let tx = x0 + PX;
+        let tw = w - 2.0 * PX;
+        let mut yy = y + ROW_V;
+        yy += pc.wrap(
+            tx,
+            yy,
+            tw,
+            "이 PC 가 로그인·잠금 화면에서도 가장자리 전환을 할 수 있는지 미리 알아봅니다. 마우스·키보드는 넘기지 않고 커서 위치만 읽습니다. 실행할 때 관리자 승인이 필요합니다.",
+            DESC,
             false,
             p.muted,
         );
-        y += 60.0;
-        y
+        yy += 8.0;
+        yy += pc.wrap(
+            tx,
+            yy,
+            tw,
+            "1. 「테스트 실행」을 누릅니다.\n2. 곧바로 Win+L 로 잠금 화면에 가서 마우스를 20~30초 움직입니다.\n3. 다시 로그인해 「결과 보기」를 누릅니다.",
+            DESC,
+            false,
+            p.ink,
+        );
+        yy += 12.0;
+        let bh = pc.btn_h();
+        let run_w = pc.btn_w("테스트 실행", None);
+        if pc.button("prun", tx, yy, run_w, bh, "테스트 실행", None, Variant::Default, true) {
+            let ok = probe::request_install_run();
+            if ok {
+                *self.probe_installed.lock().unwrap() = Some(true);
+            }
+            self.msg(
+                if ok {
+                    "테스트를 시작했습니다(약 2분 동안 기록합니다).\r\n\r\n1. 지금 Win+L 로 잠금 화면에 가서 마우스를 20~30초 움직이세요.\r\n2. 다시 로그인해 「결과 보기」를 누르세요."
+                } else {
+                    "테스트를 시작하지 못했습니다(취소했거나 관리자 승인이 막혔습니다).\r\n회사 관리 PC 정책이 막으면 여기서 멈추며, 그 자체가 「이 PC 에서는 안 됨」이라는 뜻입니다."
+                },
+                "로그인 화면 테스트",
+                MB_OK | if ok { MB_ICONINFORMATION } else { MB_ICONWARNING },
+            );
+        }
+        let res_w = pc.btn_w("결과 보기", None);
+        if pc.button("presult", tx + run_w + GAP, yy, res_w, bh, "결과 보기", None, Variant::Default, true) {
+            self.show_probe_result();
+        }
+        yy += bh + ROW_V;
+        y = yy;
+        // 지우는 동작은 맨 아래 따로 — 테스트 작업이 있을 때만.
+        if *self.probe_installed.lock().unwrap() == Some(true) {
+            divider(pc, x0, y, w);
+            let (hit, h) = buttons_row(
+                pc,
+                "premove",
+                x0,
+                y,
+                w,
+                Line::new("테스트 지우기", "이 PC 에 설치한 테스트 작업을 지웁니다. 관리자 승인이 필요합니다."),
+                &[("지우기", None, Variant::Default)],
+            );
+            if hit.is_some() && self.ask("로그인 화면 테스트 작업을 지울까요?", "테스트 지우기") {
+                let ok = probe::request_uninstall();
+                if !ok {
+                    self.msg(
+                        "지우지 못했습니다(취소했거나 관리자 승인이 막혔습니다).",
+                        "테스트 지우기",
+                        MB_OK | MB_ICONWARNING,
+                    );
+                }
+                spawn_check(&self.probe_installed, probe::is_installed);
+            }
+            y += h;
+        }
+        pc.card_end(slot, x0, top, w, y - top);
+        y + 28.0
+    }
+
+    /// 「결과 보기」 — 기록을 읽어 쉬운 말로 판정만 보여 주고, 원하면 원본 기록을 연다.
+    fn show_probe_result(&self) {
+        let path = paths::probe_log_path();
+        let verdict = read_lines(&path).map(|l| probe_result::verdict(&l)).unwrap_or(ProbeVerdict::NotRun);
+        let text = match verdict {
+            ProbeVerdict::NotRun => {
+                self.msg(
+                    "아직 테스트 결과가 없습니다.\r\n「테스트 실행」을 누른 뒤 잠금 화면에서 마우스를 움직여 보세요.",
+                    "로그인 화면 테스트",
+                    MB_OK | MB_ICONINFORMATION,
+                );
+                return;
+            }
+            ProbeVerdict::NoSecureScreen => "테스트는 실행됐지만 잠금 화면에 간 기록이 없습니다.\r\n「테스트 실행」 뒤 2분 안에 Win+L 로 잠금 화면에 가서 마우스를 움직여 주세요.",
+            ProbeVerdict::Blocked => "이 PC 에서는 잠금·로그인 화면의 커서를 읽지 못했습니다.\r\n회사 보안 정책 때문일 수 있으며, 「로그인 전에도 실행」을 켜도 로그인 화면에서는 넘어가지 않을 수 있습니다.",
+            ProbeVerdict::NoMovement => "잠금 화면에는 갔지만 커서 움직임이 기록되지 않았습니다.\r\n잠금 화면에서 마우스를 20~30초 움직이며 다시 해 보세요.",
+            ProbeVerdict::Works => "이 PC 는 로그인·잠금 화면에서도 가장자리 전환을 할 수 있습니다.\r\n「설정」에서 「로그인 전에도 실행」을 켜면 됩니다.",
+        };
+        if self.ask(&format!("{}\r\n\r\n원본 기록 파일도 열까요?", text), "로그인 화면 테스트") {
+            logiflow_win::util::open_with("notepad.exe", &path);
+        }
     }
 }
 
@@ -1138,24 +1654,27 @@ impl SettingsApp {
             ctx.send_viewport_cmd(ViewportCommand::Close);
             return;
         }
-        let (page, dark, off, bottom) = sn.steps[sn.idx];
+        let (page, dark, off, bottom, clip_on) = sn.steps[sn.idx];
         if sn.frames == 0 {
             self.page = page;
             self.offset = if bottom { 1.0e6 } else { 0.0 };
             let mut s = self.shared.lock().unwrap();
             s.config.theme = if dark { ThemeMode::Dark } else { ThemeMode::Light };
             s.config.font_offset = off;
+            s.config.clip_enabled = clip_on;
         }
         let sn = self.snapshot.as_mut().unwrap();
         sn.frames += 1;
-        if sn.frames == 4 && !sn.requested {
+        // 백그라운드 조회(방화벽·테스트 작업)가 끝날 시간을 조금 준다.
+        if sn.frames == 8 && !sn.requested {
             sn.requested = true;
             let name = format!(
-                "{}-{}-font{}{}.png",
+                "{}-{}-font{}{}{}.png",
                 ["switch", "settings", "diag"][page],
                 if dark { "dark" } else { "light" },
                 off,
-                if bottom { "-bottom" } else { "" }
+                if bottom { "-bottom" } else { "" },
+                if page == 1 && !clip_on { "-clipoff" } else { "" }
             );
             let path = sn.dir.join(name);
             let _ = std::fs::create_dir_all(&sn.dir);
@@ -1196,42 +1715,5 @@ fn center_on(ctx: &egui::Context, parent: Rect, size: Vec2) -> Pos2 {
     Pos2::new(outer.center().x - size.x / 2.0, outer.center().y - size.y / 2.0)
 }
 
-/// C# MakeRowLabel — 굵은 제목 + 두 줄 설명(288×32).
-fn row_label(pc: &Pc<'_>, x: f32, y: f32, lab: &str, desc: &str) {
-    pc.text(x, y, lab, 9.5, true, pc.pal.ink);
-    pc.text_box(x, y + 19.0, 288.0, 32.0, desc, 8.5, false, pc.pal.muted);
-}
-
-/// C# AddSettingRow — 토글이 눌리면 true.
-#[allow(clippy::too_many_arguments)]
-fn setting_row(pc: &Pc<'_>, key: &str, cx: f32, cy: f32, w: f32, top: f32, lab: &str, desc: &str, advanced: bool, on: bool) -> bool {
-    let y = cy + top;
-    let lw = pc.text(cx + 16.0, y + 12.0, lab, 9.5, true, pc.pal.ink);
-    if advanced {
-        pc.badge(cx + 16.0 + lw + 8.0, y + 11.0, 18.0, "고급", true);
-    }
-    pc.text_box(cx + 16.0, y + 32.0, w - 90.0, 18.0, desc, 8.5, false, pc.pal.muted);
-    if top > 0.0 {
-        pc.hline(cx + 16.0, y, w - 32.0);
-    }
-    pc.toggle(key, cx + w - 56.0, y + 19.0, on)
-}
-
-/// C# AddValueRow — [편집] 이 눌리면 true.
-#[allow(clippy::too_many_arguments)]
-fn value_row(pc: &Pc<'_>, key: &str, cx: f32, cy: f32, w: f32, top: f32, lab: &str, desc: &str, value: &str) -> bool {
-    let y = cy + top;
-    pc.text(cx + 16.0, y + 12.0, lab, 9.5, true, pc.pal.ink);
-    pc.text_box(cx + 16.0, y + 32.0, w - 180.0, 18.0, desc, 8.5, false, pc.pal.muted);
-    let edit_x = cx + w - 80.0;
-    let vw = pc.measure_gdi(value, 9.0, true);
-    let vx = (cx + 120.0).max(edit_x - 12.0 - vw);
-    pc.text(vx, y + 15.0, value, 9.0, true, pc.pal.accent);
-    if top > 0.0 {
-        pc.hline(cx + 16.0, y, w - 32.0);
-    }
-    pc.button(key, edit_x, y + 17.0, 64.0, 26.0, "편집", None, Variant::Default, true)
-}
-
 #[allow(dead_code)]
-fn unused(_: Align2) {}
+fn unused(_: Color32) {}

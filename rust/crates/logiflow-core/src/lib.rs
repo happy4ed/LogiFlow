@@ -9,6 +9,7 @@ pub mod glow;
 pub mod hidpp;
 pub mod log;
 pub mod logon_edges;
+pub mod probe_result;
 pub mod scan;
 pub mod switcher;
 pub mod theme;

@@ -111,6 +111,14 @@ impl AppConfig {
         }
     }
 
+    /// 화면·메뉴에 쓰는 채널 이름 — 이름을 붙였으면 「채널 N · 이름」, 아니면 「채널 N」(같은 말 두 번 안 씀).
+    pub fn channel_label(&self, channel: i32) -> String {
+        match self.aliases.iter().find(|(c, _)| *c == channel) {
+            Some((_, v)) if !v.is_empty() => format!("채널 {} · {}", channel + 1, v),
+            _ => format!("채널 {}", channel + 1),
+        }
+    }
+
     pub fn set_alias(&mut self, channel: i32, value: &str) {
         if value.is_empty() {
             self.aliases.retain(|(c, _)| *c != channel);

@@ -21,6 +21,21 @@ pub fn do_allow(port: i32) -> i32 {
     .0
 }
 
+/// 설정 창 「허용 해제」 — 관리자 승인(UAC) 후 규칙 삭제.
+pub fn request_remove() -> bool {
+    run_elevated_self("--remove-firewall", 15000)
+}
+
+/// 상승된 인스턴스(`--remove-firewall`).
+pub fn do_remove() -> i32 {
+    remove();
+    if exists() {
+        1
+    } else {
+        0
+    }
+}
+
 /// 제거 정리(상승된 인스턴스).
 pub fn remove() {
     run_hidden("netsh.exe", &format!("advfirewall firewall delete rule name=\"{}\"", FIREWALL_RULE), 10000);

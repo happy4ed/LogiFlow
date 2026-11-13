@@ -2,6 +2,7 @@
 //! Icons(24-unit 라인 아이콘)를 같은 좌표·같은 도형으로. 좌표 단위 = WinForms 픽셀(96dpi) = egui point.
 
 use egui::epaint::{CubicBezierShape, PathShape, PathStroke};
+use egui::layers::ShapeIdx;
 use egui::{Align2, Color32, CornerRadius, CursorIcon, FontFamily, FontId, Id, Painter, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
 use logiflow_core::theme::{blend, Palette, Rgb};
 
@@ -45,7 +46,12 @@ pub enum Icon {
     Edge,
     Monitor,
     Dot,
+    /// 단추 글자 오른쪽에 붙는 ▾(누르면 고르는 메뉴가 열림).
+    ChevronDown,
 }
+
+/// 카드 바탕 자리(내용을 다 그린 뒤 높이를 알고 채운다).
+pub struct CardSlot(ShapeIdx, ShapeIdx);
 
 /// 한 화면(페이지)을 그리는 맥락. origin = 페이지 (0,0) 의 화면 위치.
 pub struct Pc<'a> {
@@ -90,6 +96,65 @@ impl<'a> Pc<'a> {
     pub fn text_in(&self, rect: Rect, text: &str, font: FontId, color: Color32, align: Align2) {
         let pos = align.pos_in_rect(&rect);
         self.painter().text(pos, align, text, font, color);
+    }
+
+    /// 한 줄 높이(글꼴 행 높이).
+    pub fn line_h(&self, base: f32, bold: bool) -> f32 {
+        self.painter().layout_no_wrap("가".into(), self.f(base, bold), Color32::WHITE).size().y
+    }
+
+    /// 폭 w 로 줄바꿈했을 때의 높이.
+    pub fn wrap_h(&self, text: &str, base: f32, bold: bool, w: f32) -> f32 {
+        self.painter()
+            .layout(text.replace("\r\n", "\n"), self.f(base, bold), Color32::WHITE, w.max(1.0))
+            .size()
+            .y
+    }
+
+    /// 폭 w 로 줄바꿈해 그린다. 높이를 정해 두지 않으므로 잘리지 않는다 — 글이 길거나 글자가 커지면 줄이 늘어난다.
+    /// 그린 높이를 돌려준다.
+    pub fn wrap(&self, x: f32, y: f32, w: f32, text: &str, base: f32, bold: bool, color: Rgb) -> f32 {
+        let galley = self.painter().layout(text.replace("\r\n", "\n"), self.f(base, bold), c(color), w.max(1.0));
+        let h = galley.size().y;
+        self.painter().galley(self.origin + Vec2::new(x, y), galley, c(color));
+        h
+    }
+
+    /// 단추 폭 — 글자 폭 + 아이콘 + 좌우 여백(글자 크기 단계에 따라 늘어난다).
+    pub fn btn_w(&self, text: &str, icon: Option<Icon>) -> f32 {
+        let tw = if text.is_empty() { 0.0 } else { self.measure(text, 9.0, false) };
+        let iw = match (icon, text.is_empty()) {
+            (None, _) => 0.0,
+            (Some(_), true) => 14.0,
+            (Some(_), false) => 14.0 + 6.0,
+        };
+        let min = if text.is_empty() { 32.0 } else { 56.0 };
+        (tw + iw + 28.0).max(min).ceil()
+    }
+
+    /// 단추 높이 — 한 줄 글자 + 위아래 여백, 최소 28.
+    pub fn btn_h(&self) -> f32 {
+        (self.line_h(9.0, false) + 10.0).max(28.0).ceil()
+    }
+
+    /// 카드 바탕 자리 예약.
+    pub fn card_begin(&self) -> CardSlot {
+        CardSlot(self.painter().add(Shape::Noop), self.painter().add(Shape::Noop))
+    }
+
+    /// 예약한 자리에 카드 바탕(Section + 1px Border, 반지름 10)을 채운다.
+    pub fn card_end(&self, slot: CardSlot, x: f32, y: f32, w: f32, h: f32) {
+        self.painter()
+            .set(slot.0, Shape::rect_filled(self.r(x, y, w, h), CornerRadius::same(10), c(self.pal.section)));
+        self.painter().set(
+            slot.1,
+            Shape::rect_stroke(
+                self.inset(x, y, w, h),
+                CornerRadius::same(10),
+                Stroke::new(1.0, c(self.pal.border)),
+                StrokeKind::Middle,
+            ),
+        );
     }
 
     /// 고정 폭·높이 라벨(AutoSize=false). 줄바꿈하고 높이 밖은 잘림.
@@ -173,6 +238,16 @@ impl<'a> Pc<'a> {
         }
         let f = self.f(9.0, false);
         let icon_size = 14.0;
+        if icon == Some(Icon::ChevronDown) && !text.is_empty() {
+            // 글자 + ▾ (메뉴가 열리는 단추).
+            let tw = self.measure(text, 9.0, false);
+            let cw = 10.0;
+            let lx = rect.left() + (w - tw - 6.0 - cw) / 2.0;
+            self.painter().text(Pos2::new(lx, rect.center().y), Align2::LEFT_CENTER, text, f, c(fg));
+            let r = Rect::from_min_size(Pos2::new(lx + tw + 6.0, rect.center().y - cw / 2.0), Vec2::splat(cw));
+            draw_icon(self.painter(), Icon::ChevronDown, r, c(fg));
+            return enabled && self.interactive && resp.clicked();
+        }
         match (icon, text.is_empty()) {
             (Some(ic), true) => {
                 let r = Rect::from_center_size(rect.center(), Vec2::splat(icon_size));
@@ -423,6 +498,7 @@ pub fn draw_icon(p: &Painter, ic: Icon, r: Rect, col: Color32) {
             p.line_segment([pt(8.0, 20.0), pt(16.0, 20.0)], pen(1.7));
             p.line_segment([pt(12.0, 16.0), pt(12.0, 20.0)], pen(1.7));
         }
+        Icon::ChevronDown => line(vec![pt(5.0, 9.0), pt(12.0, 16.0), pt(19.0, 9.0)], 2.2),
         Icon::Dot => {
             // 상태 점(7×7, 세로 가운데).
             p.circle_filled(Pos2::new(r.left() + 3.5, r.top() + r.height() / 2.0), 3.5, col);
