@@ -219,7 +219,7 @@ impl Canvas {
         off: i32,
         interactive: bool,
         label: &dyn Fn(i32) -> String,
-        this_pc: Option<String>,
+        this_pc: &[String],
     ) -> Option<Vec<EdgeAttachment>> {
         self.sub_h = ui.painter().layout_no_wrap("가".into(), font(10.0, off, false), Color32::WHITE).size().y;
         self.relayout(viewport);
@@ -253,7 +253,11 @@ impl Canvas {
             p.rect_filled(rect, CornerRadius::same(5), c(pal.mon_fill));
             p.rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.5, c(pal.mon_stroke)), StrokeKind::Middle);
             let mut lines: Vec<(String, bool)> = vec![(format!("모니터 {}", i + 1), true)];
-            if let Some(t) = &this_pc {
+            // 이 PC 표시 — 칸에 들어가는 가장 긴 후보(예: 「이 PC · 채널 1」 → 「이 PC」).
+            if let Some(t) = this_pc
+                .iter()
+                .find(|t| p.layout_no_wrap((*t).clone(), font(10.5, off, false), Color32::WHITE).size().x <= rect.width() - 6.0)
+            {
                 lines.push((t.clone(), false));
             }
             if multi && primary {
@@ -314,7 +318,7 @@ impl Canvas {
             p.text(
                 Pos2::new(r.left(), r.bottom() + 2.0),
                 Align2::LEFT_TOP,
-                if auto { "붙음 · 자동" } else { "떨어짐 · 수동" },
+                if auto { "밀면 넘어감" } else { "안 넘어감" },
                 font(10.0, off, false),
                 c(pal.muted),
             );

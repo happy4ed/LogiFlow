@@ -149,24 +149,36 @@ mod win {
             current_host: 0,
             ..Default::default()
         };
+        // 전환이 안 되는 장치(리시버 자체) 하나 — 「자세히 보기」 모양을 찍으려고.
+        let receiver = ScanResult {
+            device_name: "USB Receiver".into(),
+            vid_pid: "046D:C548".into(),
+            path: r"\\?\hid#vid_046d&pid_c548&mi_02&col02#r".into(),
+            connection_type: "직접(USB/BT)".into(),
+            device_index: 0xFF,
+            ..Default::default()
+        };
         let shared = Arc::new(Mutex::new(Shared {
             config: cfg,
-            devices: vec![dev("MX Master 3S", 1, 0x0A), dev("MX Keys S", 2, 0x09)],
+            devices: vec![dev("MX Master 3S", 1, 0x0A), dev("MX Keys S", 2, 0x09), receiver],
+            clip_running: true,
             ..Default::default()
         }));
         // 3화면 × 글자 3단(작게 −1 · 보통 +1 · 크게 +3) × 위/아래(라이트) + 보통 다크 위/아래 + 클립보드 꺼진 설정 화면.
         let mut steps: Vec<crate::app::SnapStep> = Vec::new();
         for off in [-1, 1, 3] {
             for page in 0..3 {
-                steps.push((page, false, off, false, true));
-                steps.push((page, false, off, true, true));
+                steps.push((page, false, off, false, 0));
+                steps.push((page, false, off, true, 0));
             }
         }
         for page in 0..3 {
-            steps.push((page, true, 1, false, true));
-            steps.push((page, true, 1, true, true));
+            steps.push((page, true, 1, false, 0));
+            steps.push((page, true, 1, true, 0));
         }
-        steps.push((1, false, 1, false, false));
+        steps.push((1, false, 1, false, 1)); // 클립보드 공유 끔(접힘)
+        steps.push((0, false, 1, true, 2)); // 기기 자세히 보기
+        steps.push((0, false, 3, true, 2));
         let viewport = egui::ViewportBuilder::default().with_title("LogiFlow").with_inner_size([820.0, 660.0]);
         let options = eframe::NativeOptions {
             viewport,

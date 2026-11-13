@@ -15,7 +15,8 @@ pub const SET_CONFIG: usize = 2; // 내용 = 평문 설정
 pub const RESCAN: usize = 3;
 pub const SWITCH_ONE: usize = 4; // 내용 = path \t deviceIndex \t target
 pub const BYE: usize = 5;
-// 트레이 → 설정 창
+pub const SWITCH_ALL: usize = 6; // 내용 = target — 트레이 메뉴의 채널 항목과 같은 「모두 전환」(설정 창 rs.3)
+                                 // 트레이 → 설정 창
 pub const STATE: usize = 101;
 pub const SWITCH_RESULT: usize = 102; // "1" / "0"
 pub const ACTIVATE: usize = 103;

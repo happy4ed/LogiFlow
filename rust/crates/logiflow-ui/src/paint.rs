@@ -12,9 +12,11 @@ pub fn c(rgb: Rgb) -> Color32 {
 
 pub const MIN_PT: f32 = 9.5;
 
-/// C# UiFont.Get(basePt) — pt = base + 단계 가산, 최소 9.5pt. egui 크기 = em(px) = pt × 96/72.
+/// C# UiFont.Get(basePt) — pt = base + 단계 가산 + 1, 최소 9.5pt. egui 크기 = em(px) = pt × 96/72.
+/// rs.3: 모든 글자를 1pt 키웠다. C# 은 설명 글(8.5pt)이 「작게」(−1)와 「보통」(+1) 모두 최소 9.5pt 에 걸려
+/// 「작게」를 골라도 설명 크기가 그대로였다(첫 사용 점검). 이제 작게 9.5 · 보통 10.5 · 크게 12.5pt 로 단계가 보인다.
 pub fn font(base_pt: f32, offset: i32, bold: bool) -> FontId {
-    let pt = (base_pt + offset as f32).max(MIN_PT);
+    let pt = (base_pt + offset as f32 + 1.0).max(MIN_PT);
     let px = pt * 96.0 / 72.0;
     if bold {
         FontId::new(px, FontFamily::Name("bold".into()))
@@ -48,6 +50,8 @@ pub enum Icon {
     Dot,
     /// 단추 글자 오른쪽에 붙는 ▾(누르면 고르는 메뉴가 열림).
     ChevronDown,
+    /// ⋮ 더 보기(지우기 같은 드문 동작을 담는 메뉴).
+    More,
 }
 
 /// 카드 바탕 자리(내용을 다 그린 뒤 높이를 알고 채운다).
@@ -499,6 +503,11 @@ pub fn draw_icon(p: &Painter, ic: Icon, r: Rect, col: Color32) {
             p.line_segment([pt(12.0, 16.0), pt(12.0, 20.0)], pen(1.7));
         }
         Icon::ChevronDown => line(vec![pt(5.0, 9.0), pt(12.0, 16.0), pt(19.0, 9.0)], 2.2),
+        Icon::More => {
+            for yy in [5.5, 12.0, 18.5] {
+                p.circle_filled(pt(12.0, yy), 1.9 * u, col);
+            }
+        }
         Icon::Dot => {
             // 상태 점(7×7, 세로 가운데).
             p.circle_filled(Pos2::new(r.left() + 3.5, r.top() + r.height() / 2.0), 3.5, col);

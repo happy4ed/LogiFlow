@@ -280,7 +280,7 @@ fn show_menu() {
         items.push(MenuItem::Separator);
         items.push(MenuItem::Item {
             id: ID_SETTINGS,
-            text: "설정 열기".into(),
+            text: "LogiFlow 창 열기".into(),
             enabled: true,
         });
         items.push(MenuItem::Item {
@@ -314,14 +314,22 @@ fn show_menu() {
 }
 
 fn quick_switch(channel: i32) {
+    switch_all_to(channel, None);
+}
+
+/// 전환 가능한 기기 전부를 한 채널로(트레이 메뉴 · 설정 창 「모두 전환」). ui = 결과를 돌려줄 설정 창.
+fn switch_all_to(channel: i32, ui: Option<Hwnd>) {
     let job = with(|t| {
-        t.log.log(&format!("트레이 빠른 전환 → 채널 {}", channel + 1));
+        t.log.log(&format!("모두 전환 → 채널 {}", channel + 1));
         (switchable(t), t.log.clone())
     });
     if let Some((devices, log)) = job {
         std::thread::spawn(move || {
             let sent = switcher::switch_all(&WinHidBackend, &devices, channel, &log);
-            log.log(&format!("트레이 전환 전송: {}개", sent));
+            log.log(&format!("모두 전환 전송: {}개", sent));
+            if let Some(h) = ui {
+                ipc::send(h.get(), ipc::SWITCH_RESULT, if sent > 0 { "1" } else { "0" }, 2000);
+            }
             wnd::post(|| update_tray(None));
         });
     }
@@ -550,6 +558,12 @@ fn on_ipc(kind: usize, text: String) {
                 });
             } else if let Some((None, _, Some(h))) = job {
                 ipc::send(h.get(), ipc::SWITCH_RESULT, "0", 1000);
+            }
+        }
+        ipc::SWITCH_ALL => {
+            if let Ok(target) = text.trim().parse::<i32>() {
+                let ui = with(|t| t.ui_hwnd).flatten();
+                switch_all_to(target, ui);
             }
         }
         ipc::BYE => {
