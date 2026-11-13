@@ -25,3 +25,8 @@ pub fn do_allow(port: i32) -> i32 {
 pub fn remove() {
     run_hidden("netsh.exe", &format!("advfirewall firewall delete rule name=\"{}\"", FIREWALL_RULE), 10000);
 }
+
+/// 규칙이 남아 있나(조회는 일반 권한으로 됨 — 없으면 netsh 가 「규칙 없음」과 함께 0 이 아닌 코드).
+pub fn exists() -> bool {
+    run_hidden("netsh.exe", &format!("advfirewall firewall show rule name=\"{}\"", FIREWALL_RULE), 10000).0 == 0
+}

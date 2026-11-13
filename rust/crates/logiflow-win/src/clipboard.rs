@@ -34,6 +34,7 @@ struct Sync {
     last_hash: Arc<Mutex<String>>,
     applied_at: u64,
     log: Arc<DiagLogger>,
+    accept: Option<std::thread::JoinHandle<()>>,
 }
 
 thread_local! {
@@ -89,13 +90,13 @@ pub fn apply(cfg: &AppConfig, log: &Arc<DiagLogger>) {
     }
     let running = Arc::new(AtomicBool::new(true));
     let last_hash = Arc::new(Mutex::new(String::new()));
-    {
+    let accept = {
         let (running, keys, log, last_hash) = (running.clone(), keys.clone(), log.clone(), last_hash.clone());
         std::thread::Builder::new()
             .name("LogiFlow.Clip.Accept".into())
             .spawn(move || accept_loop(listener, running, keys, log, last_hash))
-            .ok();
-    }
+            .ok()
+    };
     log.log(&format!("클립보드 공유 시작: 수신 포트 {} · 상대 {}:{}", port, peer, port));
     S.with(|s| {
         *s.borrow_mut() = Some(Sync {
@@ -107,6 +108,7 @@ pub fn apply(cfg: &AppConfig, log: &Arc<DiagLogger>) {
             last_hash,
             applied_at: 0,
             log: log.clone(),
+            accept,
         })
     });
 }
@@ -120,6 +122,15 @@ pub fn stop() {
         }
         // 막혀 있는 accept 를 깨워 수신 스레드가 끝나게(자기 포트로 한 번 연결).
         let _ = TcpStream::connect_timeout(&SocketAddr::from(([127, 0, 0, 1], s.port as u16)), Duration::from_millis(300));
+        // C# 은 _listener.Stop() 으로 바로 닫는다. 여기선 수신 스레드가 리스너를 쥐고 있으므로 끝날 때까지
+        // 잠깐 기다린다 — 안 기다리면 곧바로 이어지는 apply() 의 bind 가 「포트 사용중」으로 실패해
+        // 설정을 바꿀 때마다 공유가 꺼질 수 있다(Windows 는 SO_REUSEADDR 없음). 상한 2초.
+        if let Some(h) = s.accept {
+            let until = Instant::now() + Duration::from_millis(2000);
+            while !h.is_finished() && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
     }
 }
 

@@ -72,7 +72,8 @@ pub fn do_uninstall() -> i32 {
 /// 그때만 UAC 상승(`--uninstall-machine`). 사용자 설정(`%APPDATA%\LogiFlowRs`)은 보존.
 pub fn uninstall_cleanup() -> i32 {
     crate::autostart::remove_all();
-    let machine_left = service_ctl::exists() || paths::machine_dir().exists() || crate::probe::is_installed();
+    // 방화벽 규칙만 따로 허용한 경우(로그온 전 실행은 안 켬)도 머신 범위 잔존물이다.
+    let machine_left = service_ctl::exists() || paths::machine_dir().exists() || crate::probe::is_installed() || firewall::exists();
     if machine_left && !run_elevated_self("--uninstall-machine", 60000) {
         return 1;
     }
@@ -91,6 +92,11 @@ pub fn uninstall_machine() -> i32 {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    // 덜 지워졌으면 실패로 돌려준다(머신 폴더는 지웠으니 여기선 로그를 남기지 않음 — 로그가 폴더를 되살림).
+    // (서비스는 「삭제 예약」 상태로 잠시 남을 수 있어 rc 로만 판단.)
+    if rc == 0 && paths::machine_dir().exists() {
+        return 1;
     }
     rc
 }

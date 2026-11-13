@@ -520,7 +520,8 @@ fn on_ipc(kind: usize, text: String) {
             let (path, idx, target) = (p[0].to_string(), p[1].parse::<u8>().unwrap_or(0), p[2].parse::<i32>().unwrap_or(-1));
             let job = with(|t| {
                 (
-                    t.last_results.iter().find(|r| r.path == path && r.device_index == idx).cloned(),
+                    // C# 판처럼 전환 가능 기기(Switchable: 0x1814 + 호스트 수 확인)만 — 호스트 수 미확인(-1)이면 거부.
+                    scan::switchable(&t.last_results).into_iter().find(|r| r.path == path && r.device_index == idx),
                     t.log.clone(),
                     t.ui_hwnd,
                 )
