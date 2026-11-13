@@ -16,7 +16,9 @@ $aes.Key = $aesKey; $aes.Mode = 'CBC'; $aes.Padding = 'PKCS7'; $aes.IV = [byte[]
 $ct = $aes.CreateEncryptor().TransformFinalBlock($plain, 0, $plain.Length)
 $body = New-Object byte[] (16 + $ct.Length); [Array]::Copy($aes.IV, 0, $body, 0, 16); [Array]::Copy($ct, 0, $body, 16, $ct.Length)
 $mac = [System.Security.Cryptography.HMACSHA256]::new($macKey).ComputeHash($body)
-$frame = Hex($body) + (Hex $mac)
+# 주의: `Hex($body) + (Hex $mac)` 로 쓰면 PowerShell 이 명령 모드로 읽어 `+` 와 `(Hex $mac)` 를
+# Hex 의 추가 인자로 넘기고 버린다 → HMAC 32바이트가 빠진 48바이트가 나왔다(run 43342763398). 괄호로 감싸 식으로 계산.
+$frame = (Hex $body) + (Hex $mac)
 $expect = @{
   aes = '97a903290fc2f3516137c3579fe3aab2c1b0ea4881ee1d74cf328e9ccfcb0f03'
   mac = '6cff003a638e4677e64008748b82229fd77de5aaf7c7fc4fbe297aa87c0aa317'
