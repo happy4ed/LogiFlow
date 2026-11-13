@@ -54,6 +54,22 @@ pub enum Icon {
     More,
 }
 
+/// 줄바꿈 전처리 — 「단추 이름」 안의 띄어쓰기와 「 · 」 앞 띄어쓰기를 줄바꿈 안 되는 공백으로 바꿔
+/// 이름이 두 줄로 쪼개지거나 줄 끝에 「·」만 남지 않게 한다.
+pub fn keep_together(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_quote = false;
+    for ch in text.replace("\r\n", "\n").replace(" · ", "\u{a0}· ").chars() {
+        match ch {
+            '「' => in_quote = true,
+            '」' => in_quote = false,
+            _ => {}
+        }
+        out.push(if in_quote && ch == ' ' { '\u{a0}' } else { ch });
+    }
+    out
+}
+
 /// 카드 바탕 자리(내용을 다 그린 뒤 높이를 알고 채운다).
 pub struct CardSlot(ShapeIdx, ShapeIdx);
 
@@ -110,7 +126,7 @@ impl<'a> Pc<'a> {
     /// 폭 w 로 줄바꿈했을 때의 높이.
     pub fn wrap_h(&self, text: &str, base: f32, bold: bool, w: f32) -> f32 {
         self.painter()
-            .layout(text.replace("\r\n", "\n"), self.f(base, bold), Color32::WHITE, w.max(1.0))
+            .layout(keep_together(text), self.f(base, bold), Color32::WHITE, w.max(1.0))
             .size()
             .y
     }
@@ -118,7 +134,7 @@ impl<'a> Pc<'a> {
     /// 폭 w 로 줄바꿈해 그린다. 높이를 정해 두지 않으므로 잘리지 않는다 — 글이 길거나 글자가 커지면 줄이 늘어난다.
     /// 그린 높이를 돌려준다.
     pub fn wrap(&self, x: f32, y: f32, w: f32, text: &str, base: f32, bold: bool, color: Rgb) -> f32 {
-        let galley = self.painter().layout(text.replace("\r\n", "\n"), self.f(base, bold), c(color), w.max(1.0));
+        let galley = self.painter().layout(keep_together(text), self.f(base, bold), c(color), w.max(1.0));
         let h = galley.size().y;
         self.painter().galley(self.origin + Vec2::new(x, y), galley, c(color));
         h

@@ -161,7 +161,7 @@ mod win {
         let shared = Arc::new(Mutex::new(Shared {
             config: cfg,
             devices: vec![dev("MX Master 3S", 1, 0x0A), dev("MX Keys S", 2, 0x09), receiver],
-            clip_running: true,
+            clip_running: false, // 암호문구가 비었으니 트레이도 공유를 시작하지 않은 상태
             ..Default::default()
         }));
         // 3화면 × 글자 3단(작게 −1 · 보통 +1 · 크게 +3) × 위/아래(라이트) + 보통 다크 위/아래 + 클립보드 꺼진 설정 화면.
