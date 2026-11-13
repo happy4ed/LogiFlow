@@ -730,7 +730,7 @@ impl SettingsApp {
                 // 기술 번호는 한 줄에 따로(단어 사이는 줄바꿈 안 되는 공백).
                 sub.push_str(&format!("\n제품\u{a0}{}", d.vid_pid));
                 if d.change_host_supported {
-                    sub.push_str(&format!(" · 전환\u{a0}기능\u{a0}0x{:02X}", d.change_host_index));
+                    sub.push_str(&format!("\n전환\u{a0}기능\u{a0}0x{:02X}", d.change_host_index));
                 }
             }
             let badge = format!("지금 채널 {}", if d.current_host >= 0 { (d.current_host + 1).to_string() } else { "?".into() });
