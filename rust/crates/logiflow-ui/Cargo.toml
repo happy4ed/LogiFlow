@@ -1,0 +1,17 @@
+[package]
+name = "logiflow-ui"
+description = "LogiFlow settings window (egui) — same layout as the WinForms settings window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+logiflow-core.workspace = true
+egui = "0.37"
+
+[target.'cfg(windows)'.dependencies]
+logiflow-win.workspace = true
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "accesskit", "default_fonts"] }
+raw-window-handle = "0.6"
+png = "0.18"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_UI_HiDpi"] }

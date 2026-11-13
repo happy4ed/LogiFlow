@@ -1,0 +1,22 @@
+[package]
+name = "logiflow-app"
+description = "LogiFlowRs.exe — tray, service, workers and settings window in one executable (same roles as LogiFlow.exe)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "LogiFlowRs"
+path = "src/main.rs"
+
+[dependencies]
+logiflow-core.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+logiflow-win.workspace = true
+logiflow-ui.workspace = true
+
+[build-dependencies]
+embed-manifest = "1.5"
+embed-resource = "3"

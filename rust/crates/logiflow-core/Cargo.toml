@@ -1,0 +1,18 @@
+[package]
+name = "logiflow-core"
+description = "LogiFlow OS-independent core: HID++ 0x1814, scanning, switch safety, edge detection, config formats, clipboard crypto, glow math"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+hmac = "0.12"
+sha2 = "0.10"
+sha1 = "0.10"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+subtle = "2.6"
+getrandom = "0.2"
+unicode-normalization = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

@@ -27,3 +27,8 @@ dist/
 **/.DS_Store
 Thumbs.db
 .gstack/
+
+# Rust port
+rust/target/
+rust/dist/
+rust/snapshots/

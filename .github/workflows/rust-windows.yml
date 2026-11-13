@@ -1,0 +1,129 @@
+name: Rust port — Windows build (rust-port)
+
+# 러스트 시험판(rust/) 빌드·시험·설치 파일. rust-port 브랜치에서만 돈다. 릴리스는 내지 않는다
+# (master/main 합치기·릴리스는 회장님 PC 확인 뒤 main 판단). 기존 워크플로 4개와 무관.
+on:
+  push:
+    branches: [rust-port]
+    paths:
+      - 'rust/**'
+      - '.github/workflows/rust-windows.yml'
+      - 'LogiFlow/Resources/logiflow.ico'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Core tests (OS-independent)
+        working-directory: rust
+        run: cargo test -p logiflow-core
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $text = Get-Content rust/Cargo.toml -Raw
+          $v = [regex]::Match($text, '(?m)^version = "([^"]+)"').Groups[1].Value
+          if ($v -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-rs\.[0-9]+)?$') { throw "bad version $v" }
+          $core, $pre = $v.Split('-', 2)
+          $n = if ($pre) { $pre.Split('.')[-1] } else { '0' }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "file_version=$core.$n" >> $env:GITHUB_OUTPUT
+
+      - name: Format and lint
+        working-directory: rust
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --target x86_64-pc-windows-msvc -- -D warnings
+
+      - name: Tests (core on Windows)
+        working-directory: rust
+        run: cargo test -p logiflow-core
+
+      - name: Clipboard frame = C# (.NET Framework) bytes
+        shell: powershell
+        run: ./rust/ci/clip-vector.ps1
+
+      - name: Release build x64 + arm64
+        working-directory: rust
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc -p logiflow-app
+          cargo build --release --target aarch64-pc-windows-msvc -p logiflow-app
+
+      - name: Stage
+        shell: pwsh
+        run: |
+          New-Item rust/dist/x64, rust/dist/arm64 -ItemType Directory -Force | Out-Null
+          Copy-Item rust/target/x86_64-pc-windows-msvc/release/LogiFlowRs.exe rust/dist/x64/
+          Copy-Item rust/target/aarch64-pc-windows-msvc/release/LogiFlowRs.exe rust/dist/arm64/
+          Get-ChildItem rust/dist -Recurse -File | ForEach-Object { "{0,-40} {1,10:N0} bytes" -f $_.FullName.Replace((Get-Location).Path, ''), $_.Length }
+
+      - name: Startup smoke test (no devices on runner)
+        shell: pwsh
+        run: ./rust/ci/smoke.ps1 -Exe "$pwd/rust/dist/x64/LogiFlowRs.exe"
+
+      - name: Settings window snapshots (3 screens × light/dark)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $p = Start-Process -FilePath rust/dist/x64/LogiFlowRs.exe -ArgumentList "--ui-snapshot=$pwd/rust/snapshots" -PassThru
+          if (-not $p.WaitForExit(180000)) { Stop-Process -Id $p.Id -Force; Write-Host 'snapshot timeout' }
+          Get-ChildItem rust/snapshots -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }
+
+      - name: Installer, ZIP, checksums
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          FILE_VERSION: ${{ steps.version.outputs.file_version }}
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=$env:VERSION" "/DFileVersion=$env:FILE_VERSION" "/DDistDir=..\dist" "/DOutputDir=..\dist" "rust/installer/LogiFlowRs.iss"
+          if ($LASTEXITCODE -ne 0) { throw 'Installer compile failed' }
+          $zip = "rust/dist/LogiFlowRs-v$env:VERSION-win-x64-arm64.zip"
+          Compress-Archive -Path rust/dist/x64, rust/dist/arm64 -DestinationPath $zip -Force
+          $names = @("LogiFlowRs-v$env:VERSION-setup.exe", "LogiFlowRs-v$env:VERSION-win-x64-arm64.zip")
+          $lines = foreach ($n in $names) { $h = (Get-FileHash "rust/dist/$n" -Algorithm SHA256).Hash.ToLowerInvariant(); "$h  $n" }
+          $lines | Set-Content "rust/dist/LogiFlowRs-v$env:VERSION-SHA256SUMS.txt" -Encoding utf8
+          Get-Content "rust/dist/LogiFlowRs-v$env:VERSION-SHA256SUMS.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LogiFlowRs-Windows-${{ steps.version.outputs.version }}
+          path: |
+            rust/dist/LogiFlowRs-v*-setup.exe
+            rust/dist/LogiFlowRs-v*-win-x64-arm64.zip
+            rust/dist/LogiFlowRs-v*-SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LogiFlowRs-snapshots-${{ steps.version.outputs.version }}
+          path: rust/snapshots/*.png
+          if-no-files-found: warn

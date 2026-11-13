@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["crates/logiflow-core", "crates/logiflow-win", "crates/logiflow-ui", "app"]
+
+[workspace.package]
+version = "0.16.0-rs.1"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+logiflow-core = { path = "crates/logiflow-core" }
+logiflow-win = { path = "crates/logiflow-win" }
+logiflow-ui = { path = "crates/logiflow-ui" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
