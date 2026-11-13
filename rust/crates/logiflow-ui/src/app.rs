@@ -77,8 +77,9 @@ pub struct SettingsApp {
     layout_undo: Vec<Vec<EdgeAttachment>>,
     /// 「복사」를 누른 주소 번호와 시각(2초 동안 「복사함」).
     copied: Option<(usize, Instant)>,
-    /// 「보내 보기」 마지막 결과(연결됨?, 시:분, 확인할 때의 주소·포트·암호문구 — 바뀌면 결과를 보이지 않음).
-    last_link: Option<(bool, String, String)>,
+    /// 「보내 보기」 마지막 결과(0 닿지 않음 · 1 주소에만 닿음 · 2 시험 글 보냄, 시:분, 확인할 때의 주소·포트·암호문구
+    /// — 바뀌면 결과를 보이지 않음). 받는 쪽 암호문구가 맞는지는 보내는 쪽이 알 수 없어 「연결됨」이라 하지 않는다.
+    last_link: Option<(u8, String, String)>,
     /// 「로그인 화면 테스트 열기」 — 진단 화면을 열고 테스트 묶음까지 내려간다.
     jump_test: bool,
     test_y: f32,
@@ -253,6 +254,12 @@ impl SettingsApp {
         let h = self.hwnd?;
         prompt::show(h, title, label, cur, p.content, p.ink).map(|v| logiflow_core::clip::norm(&v))
     }
+
+    /// 가린 입력 상자(암호문구) — ● 로 가리고 눈 아이콘으로 보기/숨기기.
+    fn prompt_secret(&self, title: &str, label: &str, cur: &str, p: &Palette) -> Option<String> {
+        let h = self.hwnd?;
+        prompt::show_secret(h, title, label, cur, p.content, p.ink).map(|v| logiflow_core::clip::norm(&v))
+    }
 }
 
 fn switchable(devs: &[ScanResult]) -> Vec<ScanResult> {
@@ -273,17 +280,27 @@ fn cw(vw: f32) -> f32 {
     (vw - 48.0).min(CONTENT_MAX)
 }
 /// 스캔 결과의 연결 방식을 쉬운 말로(파일 형식은 그대로 두고 화면에서만 바꾼다).
-fn connection_text(raw: &str) -> String {
+/// (연결 방식, 리시버 안 번호). 번호는 채널 번호와 헷갈리므로 「자세히 보기」에서만 보인다.
+fn connection_text(raw: &str) -> (String, Option<String>) {
     if raw.starts_with("직접") {
-        return "USB·블루투스 직접".into();
+        return ("USB·블루투스 직접 연결".into(), None);
     }
     if let Some(rest) = raw.strip_prefix("리시버 뒤(index ") {
         if let Some(n) = rest.strip_suffix(')') {
-            return format!("리시버 · {}번 자리", n);
+            return ("리시버로 연결".into(), Some(n.to_string()));
         }
     }
-    raw.to_string()
+    (raw.to_string(), None)
 }
+/// 확인 상자 끝줄 — 이 PC 로 되돌아오는 길(전환하면 이 PC 에서 마우스·키보드를 잃으므로).
+fn come_back(this_channel: i32) -> String {
+    if this_channel >= 0 {
+        format!("이 PC 로 되돌리려면 기기의 Easy-Switch 단추에서 {}번을 누르세요.", this_channel + 1)
+    } else {
+        "이 PC 로 되돌리려면 기기의 Easy-Switch 단추에서 이 PC 의 채널 번호를 누르세요.".into()
+    }
+}
+
 fn log_dir() -> std::path::PathBuf {
     logiflow_win::util::exe_dir().join("logs")
 }
@@ -565,7 +582,7 @@ impl SettingsApp {
             pc,
             w,
             "전환 관리",
-            "채널 상자를 끌어 이 PC 모니터의 가장자리에 붙이면, 그 가장자리로 커서를 밀 때 그 채널의 PC 로 넘어갑니다. 떼어 두면 자동으로 넘어가지 않습니다.",
+            "채널 상자를 끌어 이 PC 모니터의 가장자리에 붙이면, 그 가장자리로 커서를 밀 때 마우스·키보드가 모두 그 채널의 PC 로 넘어갑니다. 떼어 두면 자동으로 넘어가지 않습니다.",
         );
 
         // 캔버스(이 PC 모니터 + 다른 채널 상자).
@@ -631,190 +648,6 @@ impl SettingsApp {
         }
         y += 18.0;
 
-        // 채널 이름.
-        pc.text(x0, y, "채널 이름", LAB, true, p.ink);
-        y += pc.line_h(LAB, true) + 2.0;
-        y += pc.wrap(
-            x0,
-            y,
-            w,
-            "다른 PC 를 알아보기 쉬운 이름을 붙입니다. 누르면 바꿀 수 있고, 비우면 「채널 N」으로 돌아갑니다.",
-            DESC,
-            false,
-            p.muted,
-        );
-        y += 8.0;
-        let count = max_host.max(1);
-        let chip_w = ((w - (count - 1) as f32 * GAP) / count as f32).floor().max(110.0);
-        let chip_h = (pc.line_h(8.5, false) + 14.0).max(32.0);
-        let mut ax = x0;
-        for ch in 0..count {
-            let chip = pc.r(ax, y, chip_w, chip_h);
-            let resp = pc.click_area(&format!("chip{}", ch), chip);
-            if resp.hovered() && pc.interactive {
-                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-            }
-            pc.card(ax, y, chip_w, chip_h);
-            let lab = format!("채널 {}", ch + 1);
-            let lab_w = pc.measure(&lab, 8.0, true);
-            let ty = y + (chip_h - pc.line_h(8.5, false)) / 2.0;
-            pc.text(ax + 10.0, ty, &lab, 8.0, true, p.ink);
-            let pen_x = ax + chip_w - 24.0 - 6.0;
-            let al_left = ax + 10.0 + lab_w + 10.0;
-            let al_w = (pen_x - al_left - 6.0).max(10.0);
-            let has_name = cfg.aliases.iter().any(|(c, v)| *c == ch && !v.is_empty());
-            if has_name {
-                pc.text_ellipsis(al_left, ty, al_w, &cfg.alias_for(ch), 8.5, false, p.ink);
-            } else {
-                pc.text_ellipsis(al_left, ty, al_w, "이름 없음", 8.5, false, p.muted);
-            }
-            pc.icon(Icon::Pencil, pen_x + 4.0, y + (chip_h - 16.0) / 2.0, 16.0, p.muted);
-            if resp.clicked() && pc.interactive {
-                self.edit_alias(ch, cfg, p);
-            }
-            ax += chip_w + GAP;
-        }
-        y += chip_h + 22.0;
-
-        // 기기 — 목록은 이 화면 한 곳에만(진단 정보는 「자세히 보기」).
-        let sw = switchable(devices);
-        let shown: Vec<&ScanResult> = devices
-            .iter()
-            .filter(|r| self.detail || (r.change_host_supported && r.host_count > 0))
-            .collect();
-        let rescan = if scanning { "찾는 중…" } else { "다시 찾기" };
-        let rw = pc.btn_w(rescan, Some(Icon::Refresh));
-        let lh = pc.line_h(LAB, true);
-        let others = shown.len().saturating_sub(sw.len());
-        let head = if self.detail && others > 0 {
-            format!("기기   {}개 · 전환 안 되는 장치 {}개", sw.len(), others)
-        } else {
-            format!("기기   {}개", sw.len())
-        };
-        pc.text(x0, y + (bh - lh) / 2.0, &head, LAB, true, p.ink);
-        if pc.button("rescan", x0 + w - rw, y, rw, bh, rescan, Some(Icon::Refresh), Variant::Default, !scanning) {
-            self.rescan();
-        }
-        y += bh + 4.0;
-        y += pc.wrap(x0, y, w, "연결된 로지텍 마우스·키보드를 자동으로 찾습니다.", DESC, false, p.muted);
-        y += 6.0;
-        if shown.is_empty() {
-            y += 4.0;
-            y += pc.wrap(
-                x0,
-                y,
-                w,
-                "찾은 기기가 없습니다. 기기를 켜거나 리시버를 꽂은 뒤 「다시 찾기」를 누르세요.",
-                9.5,
-                false,
-                p.muted,
-            );
-            y += 10.0;
-        }
-        let one_label = "이 기기만 전환";
-        let one_w = pc.btn_w(one_label, Some(Icon::ChevronDown)) + 10.0;
-        let name_lh = pc.line_h(9.5, false);
-        let sub_lh = pc.line_h(8.0, false);
-        for (i, d) in shown.iter().enumerate() {
-            let ok = d.change_host_supported && d.host_count > 0;
-            let is_receiver = d.device_name.to_ascii_lowercase().contains("receiver") || d.device_name.contains("리시버");
-            let mut sub = if is_receiver && d.device_index == 0xFF {
-                "리시버 본체".to_string()
-            } else {
-                connection_text(&d.connection_type)
-            };
-            if !ok {
-                sub.push_str(" · 채널 전환 안 됨");
-            }
-            if self.detail {
-                // 기술 번호는 한 줄에 따로(단어 사이는 줄바꿈 안 되는 공백).
-                sub.push_str(&format!("\n제품\u{a0}{}", d.vid_pid));
-                if d.change_host_supported {
-                    sub.push_str(&format!("\n전환\u{a0}기능\u{a0}0x{:02X}", d.change_host_index));
-                }
-            }
-            let badge = format!("지금 채널 {}", if d.current_host >= 0 { (d.current_host + 1).to_string() } else { "?".into() });
-            let badge_h = (pc.line_h(8.5, true) + 4.0).max(24.0);
-            let badge_w = pc.measure_gdi(&badge, 8.5, true) + 20.0;
-            let bx = x0 + w - one_w;
-            let badge_x = bx - 12.0 - badge_w;
-            let text_x = x0 + 30.0;
-            let text_w = if ok { badge_x - 12.0 - text_x } else { w - 30.0 };
-            let sub_h = pc.wrap_h(&sub, 8.0, false, text_w);
-            let row_h = (name_lh + 2.0 + sub_h + 18.0).max(bh + 16.0).max(48.0);
-            let ty = y + (row_h - (name_lh + 2.0 + sub_h)) / 2.0;
-            let icon = if is_receiver || (!ok && !looks_like_keyboard(&d.device_name)) {
-                Icon::Plug
-            } else if looks_like_keyboard(&d.device_name) {
-                Icon::Keyboard
-            } else {
-                Icon::Mouse
-            };
-            pc.icon(icon, x0 + 2.0, y + (row_h - 18.0) / 2.0, 18.0, p.muted);
-            pc.text_ellipsis(text_x, ty, text_w, &d.device_name, 9.5, false, if ok { p.ink } else { p.muted });
-            pc.wrap(text_x, ty + name_lh + 2.0, text_w, &sub, 8.0, false, p.muted);
-            if ok {
-                pc.badge(badge_x, y + (row_h - badge_h) / 2.0, badge_h, &badge, false);
-                if pc.button(
-                    &format!("sw{}", i),
-                    bx,
-                    y + (row_h - bh) / 2.0,
-                    one_w,
-                    bh,
-                    one_label,
-                    Some(Icon::ChevronDown),
-                    Variant::Default,
-                    true,
-                ) {
-                    let anchor = pc.r(bx, y + (row_h - bh) / 2.0, one_w, bh).left_bottom();
-                    self.device_switch_menu(ctx, anchor, d, max_host, cfg);
-                }
-            }
-            pc.hline(x0, y + row_h - 1.0, w);
-            let _ = sub_lh;
-            y += row_h;
-        }
-        // 모두 전환(트레이 메뉴의 채널 항목과 같은 동작).
-        if !sw.is_empty() {
-            let all_label = "모두 전환";
-            let aw = pc.btn_w(all_label, Some(Icon::ChevronDown)) + 10.0;
-            let t_w = w - aw - 16.0;
-            let th = pc.wrap_h("마우스·키보드를 한꺼번에 다른 PC 로 보냅니다.", DESC, false, t_w);
-            let row_h = th.max(bh) + 20.0;
-            pc.wrap(
-                x0,
-                y + (row_h - th) / 2.0,
-                t_w,
-                "마우스·키보드를 한꺼번에 다른 PC 로 보냅니다.",
-                DESC,
-                false,
-                p.muted,
-            );
-            if pc.button(
-                "swall",
-                x0 + w - aw,
-                y + (row_h - bh) / 2.0,
-                aw,
-                bh,
-                all_label,
-                Some(Icon::ChevronDown),
-                Variant::Default,
-                true,
-            ) {
-                let anchor = pc.r(x0 + w - aw, y + (row_h - bh) / 2.0, aw, bh).left_bottom();
-                self.all_switch_menu(ctx, anchor, &sw, max_host, current, cfg);
-            }
-            y += row_h;
-        }
-        // 자세히 보기 ↔ 간단히 보기(화면만 바꾸는 것이라 링크).
-        let link = if self.detail { "간단히 보기" } else { "자세히 보기" };
-        let lw = pc.btn_w(link, None);
-        y += 4.0;
-        if pc.button("detail", x0 - 14.0, y, lw, bh, link, None, Variant::Ghost, true) {
-            self.detail = !self.detail;
-        }
-        y += bh + 20.0;
-
         // 가장자리 자동 전환(이 화면에만 둔다 — 배치와 함께 쓰는 설정).
         y = section(pc, y, "가장자리 자동 전환");
         let slot = pc.card_begin();
@@ -827,7 +660,7 @@ impl SettingsApp {
             w,
             Line::new(
                 "사용",
-                "붙여 둔 가장자리로 커서를 밀면 그 채널로 넘어갑니다. 끄면 단추나 트레이 메뉴로 직접 넘길 때만 넘어갑니다.",
+                "붙여 둔 가장자리로 커서를 밀면 마우스·키보드가 모두 그 채널로 넘어갑니다. 끄면 단추나 트레이 메뉴로 직접 넘길 때만 넘어갑니다.",
             ),
             cfg.edge_switch_enabled,
         );
@@ -891,7 +724,196 @@ impl SettingsApp {
         }
         y += h;
         pc.card_end(slot, x0, top, w, y - top);
-        y + 28.0
+        y += 26.0;
+
+        // 채널 이름.
+        pc.text(x0, y, "채널 이름", LAB, true, p.ink);
+        y += pc.line_h(LAB, true) + 2.0;
+        y += pc.wrap(
+            x0,
+            y,
+            w,
+            "다른 PC 를 알아보기 쉬운 이름을 붙입니다. 누르면 바꿀 수 있고, 비우면 「채널 N」으로 돌아갑니다.",
+            DESC,
+            false,
+            p.muted,
+        );
+        y += 8.0;
+        let count = max_host.max(1);
+        let chip_w = ((w - (count - 1) as f32 * GAP) / count as f32).floor().max(110.0);
+        let chip_h = (pc.line_h(8.5, false) + 14.0).max(32.0);
+        let mut ax = x0;
+        for ch in 0..count {
+            let chip = pc.r(ax, y, chip_w, chip_h);
+            let resp = pc.click_area(&format!("chip{}", ch), chip);
+            if resp.hovered() && pc.interactive {
+                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            pc.card(ax, y, chip_w, chip_h);
+            let lab = format!("채널 {}", ch + 1);
+            let lab_w = pc.measure(&lab, 8.0, true);
+            let ty = y + (chip_h - pc.line_h(8.5, false)) / 2.0;
+            pc.text(ax + 10.0, ty, &lab, 8.0, true, p.ink);
+            let pen_x = ax + chip_w - 24.0 - 6.0;
+            let al_left = ax + 10.0 + lab_w + 10.0;
+            let al_w = (pen_x - al_left - 6.0).max(10.0);
+            let has_name = cfg.aliases.iter().any(|(c, v)| *c == ch && !v.is_empty());
+            if has_name {
+                pc.text_ellipsis(al_left, ty, al_w, &cfg.alias_for(ch), 8.5, false, p.ink);
+            } else {
+                pc.text_ellipsis(al_left, ty, al_w, "이름 없음", 8.5, false, p.muted);
+            }
+            pc.icon(Icon::Pencil, pen_x + 4.0, y + (chip_h - 16.0) / 2.0, 16.0, p.muted);
+            if resp.clicked() && pc.interactive {
+                self.edit_alias(ch, cfg, p);
+            }
+            ax += chip_w + GAP;
+        }
+        y += chip_h + 22.0;
+
+        // 기기 — 목록은 이 화면 한 곳에만(진단 정보는 「자세히 보기」).
+        let sw = switchable(devices);
+        let shown: Vec<&ScanResult> = devices
+            .iter()
+            .filter(|r| self.detail || (r.change_host_supported && r.host_count > 0))
+            .collect();
+        let rescan = if scanning { "찾는 중…" } else { "다시 찾기" };
+        let rw = pc.btn_w(rescan, Some(Icon::Refresh));
+        let lh = pc.line_h(LAB, true);
+        let others = shown.len().saturating_sub(sw.len());
+        let head = if self.detail && others > 0 {
+            format!("기기   {}개 · 전환 안 되는 장치 {}개", sw.len(), others)
+        } else {
+            format!("기기   {}개", sw.len())
+        };
+        let head_w = pc.text(x0, y + (bh - lh) / 2.0, &head, LAB, true, p.ink);
+        // 「자세히 보기」 ↔ 「간단히 보기」 — 목록 표시만 바꾸므로 링크, 목록 머리 바로 옆.
+        let link = if self.detail { "간단히 보기" } else { "자세히 보기" };
+        let link_w = pc.btn_w(link, None);
+        if pc.button("detail", x0 + head_w + 4.0, y, link_w, bh, link, None, Variant::Ghost, true) {
+            self.detail = !self.detail;
+        }
+        if pc.button("rescan", x0 + w - rw, y, rw, bh, rescan, Some(Icon::Refresh), Variant::Default, !scanning) {
+            self.rescan();
+        }
+        y += bh + 4.0;
+        y += pc.wrap(x0, y, w, "연결된 로지텍 마우스·키보드를 자동으로 찾습니다.", DESC, false, p.muted);
+        y += 6.0;
+        if shown.is_empty() {
+            y += 4.0;
+            y += pc.wrap(
+                x0,
+                y,
+                w,
+                "찾은 기기가 없습니다. 기기를 켜거나 리시버를 꽂은 뒤 「다시 찾기」를 누르세요.",
+                9.5,
+                false,
+                p.muted,
+            );
+            y += 10.0;
+        }
+        let one_label = "이 기기만 전환";
+        let one_w = pc.btn_w(one_label, Some(Icon::ChevronDown)) + 10.0;
+        let name_lh = pc.line_h(9.5, false);
+        let sub_lh = pc.line_h(8.0, false);
+        for (i, d) in shown.iter().enumerate() {
+            let ok = d.change_host_supported && d.host_count > 0;
+            let is_receiver = d.device_name.to_ascii_lowercase().contains("receiver") || d.device_name.contains("리시버");
+            let (conn, slot) = connection_text(&d.connection_type);
+            let mut sub = if is_receiver && d.device_index == 0xFF {
+                "리시버 본체".to_string()
+            } else {
+                conn
+            };
+            if ok {
+                // 지금 붙어 있는 채널은 글로(알약 모양은 꺼진 단추처럼 보여서 쓰지 않음).
+                if d.current_host >= 0 {
+                    sub.push_str(&format!(" · 지금 채널 {}", d.current_host + 1));
+                }
+            } else {
+                sub.push_str(" · 채널 전환 안 됨");
+            }
+            if self.detail {
+                // 기술 번호는 한 줄에 하나씩(단어 사이는 줄바꿈 안 되는 공백).
+                if let Some(n) = slot {
+                    sub.push_str(&format!("\n리시버\u{a0}안\u{a0}번호\u{a0}{}", n));
+                }
+                sub.push_str(&format!("\n제품\u{a0}{}", d.vid_pid));
+                if d.change_host_supported {
+                    sub.push_str(&format!("\n전환\u{a0}기능\u{a0}0x{:02X}", d.change_host_index));
+                }
+            }
+            let bx = x0 + w - one_w;
+            let text_x = x0 + 30.0;
+            let text_w = if ok { bx - 16.0 - text_x } else { w - 30.0 };
+            let sub_h = pc.wrap_h(&sub, 8.0, false, text_w);
+            let row_h = (name_lh + 2.0 + sub_h + 18.0).max(bh + 16.0).max(48.0);
+            let ty = y + (row_h - (name_lh + 2.0 + sub_h)) / 2.0;
+            let icon = if is_receiver || (!ok && !looks_like_keyboard(&d.device_name)) {
+                Icon::Plug
+            } else if looks_like_keyboard(&d.device_name) {
+                Icon::Keyboard
+            } else {
+                Icon::Mouse
+            };
+            pc.icon(icon, x0 + 2.0, y + (row_h - 18.0) / 2.0, 18.0, p.muted);
+            pc.text_ellipsis(text_x, ty, text_w, &d.device_name, 9.5, false, if ok { p.ink } else { p.muted });
+            pc.wrap(text_x, ty + name_lh + 2.0, text_w, &sub, 8.0, false, p.muted);
+            if ok
+                && pc.button(
+                    &format!("sw{}", i),
+                    bx,
+                    y + (row_h - bh) / 2.0,
+                    one_w,
+                    bh,
+                    one_label,
+                    Some(Icon::ChevronDown),
+                    Variant::Default,
+                    true,
+                )
+            {
+                let anchor = pc.r(bx, y + (row_h - bh) / 2.0, one_w, bh).left_bottom();
+                self.device_switch_menu(ctx, anchor, d, max_host, cfg);
+            }
+            pc.hline(x0, y + row_h - 1.0, w);
+            let _ = sub_lh;
+            y += row_h;
+        }
+        // 모두 전환(트레이 메뉴의 채널 항목과 같은 동작).
+        if !sw.is_empty() {
+            let all_label = "모두 전환";
+            let aw = pc.btn_w(all_label, Some(Icon::ChevronDown)) + 10.0;
+            let t_w = w - aw - 16.0;
+            let th = pc.wrap_h("마우스·키보드를 한꺼번에 다른 PC 로 보냅니다.", DESC, false, t_w);
+            let row_h = th.max(bh) + 20.0;
+            pc.wrap(
+                x0,
+                y + (row_h - th) / 2.0,
+                t_w,
+                "마우스·키보드를 한꺼번에 다른 PC 로 보냅니다.",
+                DESC,
+                false,
+                p.muted,
+            );
+            if pc.button(
+                "swall",
+                x0 + w - aw,
+                y + (row_h - bh) / 2.0,
+                aw,
+                bh,
+                all_label,
+                Some(Icon::ChevronDown),
+                Variant::Default,
+                true,
+            ) {
+                let anchor = pc.r(x0 + w - aw, y + (row_h - bh) / 2.0, aw, bh).left_bottom();
+                self.all_switch_menu(ctx, anchor, &sw, max_host, current, cfg);
+            }
+            y += row_h;
+        }
+        y += 22.0;
+
+        y + 6.0
     }
 
     fn edit_alias(&mut self, ch: i32, cfg: &AppConfig, p: &Palette) {
@@ -938,9 +960,10 @@ impl SettingsApp {
             return;
         }
         let q = format!(
-            "{}\r\n→ {}\r\n\r\n이 기기를 전환할까요? 전환하면 이 PC 에서는 이 기기를 쓸 수 없습니다.",
+            "{}\r\n→ {}\r\n\r\n이 기기를 전환할까요? 전환하면 이 PC 에서는 이 기기를 쓸 수 없습니다.\r\n{}",
             d.device_name,
-            cfg.channel_label(target)
+            cfg.channel_label(target),
+            come_back(d.current_host)
         );
         if self.msg(&q, "이 기기만 전환", MB_YESNO | MB_ICONWARNING) != IDYES {
             return;
@@ -960,9 +983,10 @@ impl SettingsApp {
         }
         let names: Vec<&str> = sw.iter().map(|d| d.device_name.as_str()).collect();
         let q = format!(
-            "{}\r\n→ {}\r\n\r\n모두 전환할까요? 전환하면 이 PC 에서는 이 기기들을 쓸 수 없습니다.",
+            "{}\r\n→ {}\r\n\r\n모두 전환할까요? 전환하면 이 PC 에서는 이 기기들을 쓸 수 없습니다.\r\n{}",
             names.join(" · "),
-            cfg.channel_label(target)
+            cfg.channel_label(target),
+            come_back(current)
         );
         if self.msg(&q, "모두 전환", MB_YESNO | MB_ICONWARNING) != IDYES {
             return;
@@ -1077,7 +1101,7 @@ impl SettingsApp {
         }
         y += h - ROW_V + 2.0;
         // 테스트로 가는 길(화면 이동이라 링크).
-        let link = "로그인 화면 테스트 열기";
+        let link = "진단 화면에서 테스트하기";
         let lw = pc.btn_w(link, None);
         if pc.button("gotest", cx + PX - 14.0, y, lw, bh, link, None, Variant::Ghost, true) {
             self.page = 2;
@@ -1106,7 +1130,7 @@ impl SettingsApp {
         } else if !clip_running {
             use_line.status("시작하지 못함 — 다른 프로그램이 포트를 쓰고 있을 수 있습니다", p.warn)
         } else if fw_now == Some(false) {
-            use_line.status("보내기만 됨 — 받으려면 아래에서 방화벽을 허용하세요", p.warn)
+            use_line.status("받기가 막혀 있을 수 있음 — 아래 「Windows 방화벽」에서 허용하세요", p.warn)
         } else {
             use_line.status("주고받을 준비됨", p.ink)
         };
@@ -1151,7 +1175,12 @@ impl SettingsApp {
                 let (hit, h) = buttons_row(pc, key, cx, y, w, line, &btns);
                 match hit {
                     Some(0) => {
-                        if let Some(v) = self.prompt(lab, prompt_label, &value, p) {
+                        let v = if is_secret {
+                            self.prompt_secret(lab, prompt_label, &value, p)
+                        } else {
+                            self.prompt(lab, prompt_label, &value, p)
+                        };
+                        if let Some(v) = v {
                             if is_secret {
                                 self.apply(|c| c.clip_secret = v);
                             } else {
@@ -1233,14 +1262,14 @@ impl SettingsApp {
             let line = Line::new(
                 "Windows 방화벽",
                 format!(
-                    "상대 PC 가 이 PC 로 보내려면 포트 {} 를 열어 두어야 합니다. 바꿀 때 관리자 승인이 필요합니다.",
+                    "상대 PC 가 이 PC 로 보내려면 포트 {}번을 열어 두어야 합니다. 바꿀 때 관리자 승인이 필요합니다.",
                     cfg.clip_port
                 ),
             );
             let (hit, h) = match fw {
                 None => (None, row_text(pc, cx, y, w, 0.0, &line.value("확인 중…", p.muted))),
                 Some(true) => buttons_row(pc, "fwoff", cx, y, w, line.value("허용됨", p.ink), &[("허용 해제", None, Variant::Default)]),
-                Some(false) => buttons_row(pc, "fwon", cx, y, w, line.value("허용 안 됨", p.warn), &[("허용", None, Variant::Default)]),
+                Some(false) => buttons_row(pc, "fwon", cx, y, w, line.value("허용 규칙 없음", p.warn), &[("허용", None, Variant::Default)]),
             };
             if hit.is_some() {
                 let failed = match fw {
@@ -1265,9 +1294,10 @@ impl SettingsApp {
             let line = Line::new("연결 확인", "상대 PC 로 시험 글을 한 번 보냅니다. 상대 PC 에서 붙여 넣어 확인하세요.");
             let link_key = format!("{}|{}|{}", cfg.clip_peer_host, cfg.clip_port, cfg.clip_secret);
             let line = match &self.last_link {
-                Some((true, t, k)) if *k == link_key => line.value(format!("연결됨 · {}", t), p.ink),
-                Some((false, t, k)) if *k == link_key => line.value(format!("연결 안 됨 · {}", t), p.warn),
-                _ => line.value("아직 확인 안 함", p.muted),
+                Some((2, t, k)) if *k == link_key => line.status(format!("{} 시험 글 보냄 — 상대 PC 에서 붙여 넣어 확인하세요", t), p.ink),
+                Some((1, t, k)) if *k == link_key => line.status(format!("{} 주소에는 닿음 — 암호문구를 넣으면 시험 글까지 보냅니다", t), p.ink),
+                Some((0, t, k)) if *k == link_key => line.status(format!("{} 닿지 않음 — 주소와 방화벽을 확인하세요", t), p.warn),
+                _ => line.status("아직 확인 안 함", p.muted),
             };
             let (hit, h) = buttons_row(pc, "ctest", cx, y, w, line, &[("보내 보기", None, Variant::Default)]);
             if hit.is_some() {
@@ -1276,10 +1306,13 @@ impl SettingsApp {
                 } else if cfg.clip_secret.is_empty() || !clip_running {
                     // 암호문구가 없거나 공유가 아직 시작 전이면 연결만 확인한다.
                     let (ok, m) = clipboard::test_connect(&cfg.clip_peer_host, cfg.clip_port);
-                    (Some(ok), format!("{}\r\n\r\n암호문구를 넣고 공유가 시작되면 시험 글까지 보냅니다.", m))
+                    (
+                        Some(if ok { 1u8 } else { 0 }),
+                        format!("{}\r\n\r\n암호문구를 넣고 공유가 시작되면 시험 글까지 보냅니다.", m),
+                    )
                 } else {
                     let (ok, m) = clipboard::send_test(true, cfg);
-                    (Some(ok), m)
+                    (Some(if ok { 2u8 } else { 0 }), m)
                 };
                 if let Some(ok) = ok {
                     let hm = logiflow_win::session::local_time_hms().get(..5).unwrap_or("").to_string();

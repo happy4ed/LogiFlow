@@ -9,7 +9,7 @@ use std::rc::Rc;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
-use windows::Win32::UI::Controls::EM_SETSEL;
+use windows::Win32::UI::Controls::{EM_SETPASSWORDCHAR, EM_SETSEL};
 use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow};
 use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, SetFocus};
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -17,6 +17,11 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 const IDOK_: i32 = 1;
 const IDCANCEL_: i32 = 2;
 const ID_EDIT: i32 = 100;
+const ID_EYE: i32 = 101;
+/// Segoe MDL2 Assets 「보기」·「숨기기」 그림 글자(Windows 10·11 기본 글꼴).
+const GLYPH_VIEW: &str = "\u{E890}";
+const GLYPH_HIDE: &str = "\u{ED1A}";
+const MASK: u16 = 0x25CF; // ●
 const DM_GETDEFID: u32 = WM_USER;
 const DC_HASDEFID: u32 = 0x534B;
 
@@ -26,6 +31,15 @@ fn colorref(c: Rgb) -> COLORREF {
 
 /// 확인 = Some(앞뒤 공백 제거한 값), 취소 = None.
 pub fn show(owner: HWND, title: &str, label: &str, initial: &str, bg: Rgb, fg: Rgb) -> Option<String> {
+    show_inner(owner, title, label, initial, bg, fg, false)
+}
+
+/// 가린 입력(암호문구) — 글자는 ●로 가리고, 오른쪽 눈 아이콘 단추로 보기/숨기기(오타 확인용).
+pub fn show_secret(owner: HWND, title: &str, label: &str, initial: &str, bg: Rgb, fg: Rgb) -> Option<String> {
+    show_inner(owner, title, label, initial, bg, fg, true)
+}
+
+fn show_inner(owner: HWND, title: &str, label: &str, initial: &str, bg: Rgb, fg: Rgb, secret: bool) -> Option<String> {
     let dpi = unsafe { GetDpiForWindow(owner) }.max(96) as i32;
     let s = |v: i32| v * dpi / 96;
     let done: Rc<Cell<Option<bool>>> = Rc::new(Cell::new(None));
@@ -33,12 +47,27 @@ pub fn show(owner: HWND, title: &str, label: &str, initial: &str, bg: Rgb, fg: R
     let result: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     let brush = unsafe { CreateSolidBrush(colorref(bg)) };
 
+    let shown = Rc::new(Cell::new(false));
     let handler: Handler = {
-        let (done, edit_hwnd, result) = (done.clone(), edit_hwnd.clone(), result.clone());
+        let (done, edit_hwnd, result, shown) = (done.clone(), edit_hwnd.clone(), result.clone(), shown.clone());
         Rc::new(move |h, msg, wp, lp| match msg {
             WM_COMMAND => {
                 let id = (wp.0 & 0xFFFF) as i32;
-                if id == IDOK_ {
+                if id == ID_EYE {
+                    let e = edit_hwnd.get();
+                    let now = !shown.get();
+                    shown.set(now);
+                    unsafe {
+                        SendMessageW(e, EM_SETPASSWORDCHAR, Some(WPARAM(if now { 0 } else { MASK as usize })), Some(LPARAM(0)));
+                        let _ = InvalidateRect(Some(e), None, true);
+                        if let Ok(b) = GetDlgItem(Some(h), ID_EYE) {
+                            let t = wide(if now { GLYPH_HIDE } else { GLYPH_VIEW });
+                            let _ = SetWindowTextW(b, PCWSTR(t.as_ptr()));
+                        }
+                        let _ = SetFocus(Some(e));
+                    }
+                    Some(LRESULT(0))
+                } else if id == IDOK_ {
                     let e = edit_hwnd.get();
                     let len = unsafe { GetWindowTextLengthW(e) } as usize;
                     let mut buf = vec![0u16; len + 1];
@@ -129,15 +158,45 @@ pub fn show(owner: HWND, title: &str, label: &str, initial: &str, bg: Rgb, fg: R
         }
     };
     child("STATIC", label, WINDOW_STYLE(0), WINDOW_EX_STYLE(0), -1, (16, 16, 308, 20));
+    let edit_style = WS_TABSTOP | WS_BORDER | WINDOW_STYLE(ES_AUTOHSCROLL as u32) | if secret { WINDOW_STYLE(ES_PASSWORD as u32) } else { WINDOW_STYLE(0) };
     let edit = child(
         "EDIT",
         initial,
-        WS_TABSTOP | WS_BORDER | WINDOW_STYLE(ES_AUTOHSCROLL as u32),
+        edit_style,
         WS_EX_CLIENTEDGE,
         ID_EDIT,
-        (16, 42, 308, 20),
+        (16, 42, if secret { 274 } else { 308 }, 20),
     );
     edit_hwnd.set(edit);
+    let mut icon_font = HFONT::default();
+    if secret {
+        unsafe {
+            SendMessageW(edit, EM_SETPASSWORDCHAR, Some(WPARAM(MASK as usize)), Some(LPARAM(0)));
+        }
+        let eye = child(
+            "BUTTON",
+            GLYPH_VIEW,
+            WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32),
+            WINDOW_EX_STYLE(0),
+            ID_EYE,
+            (294, 41, 30, 22),
+        );
+        icon_font = unsafe {
+            let mut lf = LOGFONTW {
+                lfHeight: -(12 * dpi / 96),
+                lfCharSet: DEFAULT_CHARSET,
+                ..Default::default()
+            };
+            let face = wide("Segoe MDL2 Assets");
+            for (i, ch) in face.iter().take(31).enumerate() {
+                lf.lfFaceName[i] = *ch;
+            }
+            CreateFontIndirectW(&lf)
+        };
+        unsafe {
+            SendMessageW(eye, WM_SETFONT, Some(WPARAM(icon_font.0 as usize)), Some(LPARAM(1)));
+        }
+    }
     child(
         "BUTTON",
         "확인",
@@ -175,6 +234,9 @@ pub fn show(owner: HWND, title: &str, label: &str, initial: &str, bg: Rgb, fg: R
         let _ = SetForegroundWindow(owner);
         let _ = DestroyWindow(dlg);
         let _ = DeleteObject(font.into());
+        if !icon_font.is_invalid() {
+            let _ = DeleteObject(icon_font.into());
+        }
         let _ = DeleteObject(brush.into());
     }
     if done.get() == Some(true) {
