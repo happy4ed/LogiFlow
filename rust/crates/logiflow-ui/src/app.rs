@@ -596,7 +596,7 @@ impl SettingsApp {
             pc,
             w,
             "전환 관리",
-            "채널은 마우스·키보드의 Easy-Switch 단추 번호(1~3)이고, 단추마다 PC 가 하나씩 짝지어져 있습니다. 채널 상자를 끌어 이 PC 모니터의 가장자리에 붙이면, 그 가장자리로 커서를 밀 때 마우스·키보드가 모두 그 채널의 PC 로 넘어갑니다. 떼어 두면 자동으로 넘어가지 않습니다.",
+            "채널은 마우스·키보드의 Easy-Switch 단추 번호(1~3)이고, 단추마다 PC 가 하나씩 짝지어져 있습니다. 채널 상자를 끌어 이 PC 모니터의 가장자리에 붙이세요. 잠깐 끄려면 아래 「가장자리 자동 전환」의 「사용」을 끄면 됩니다.",
         );
 
         // 캔버스(이 PC 모니터 + 다른 채널 상자).
@@ -851,14 +851,16 @@ impl SettingsApp {
                 sub.push_str(" · 채널 전환 안 됨");
             }
             if self.detail {
-                // 기술 번호는 한 줄에 하나씩(단어 사이는 줄바꿈 안 되는 공백).
+                // 문제를 찾을 때(또는 C# 판과 맞춰 볼 때) 쓰는 번호 — 무엇에 쓰는지 머리말을 붙인다.
+                let mut ids = Vec::new();
                 if let Some(n) = slot {
-                    sub.push_str(&format!("\n리시버\u{a0}안\u{a0}번호\u{a0}{}", n));
+                    ids.push(format!("리시버\u{a0}안\u{a0}{}번", n));
                 }
-                sub.push_str(&format!("\n제품\u{a0}{}", d.vid_pid));
+                ids.push(format!("제품\u{a0}{}", d.vid_pid));
                 if d.change_host_supported {
-                    sub.push_str(&format!("\n전환\u{a0}기능\u{a0}0x{:02X}", d.change_host_index));
+                    ids.push(format!("전환\u{a0}기능\u{a0}0x{:02X}", d.change_host_index));
                 }
+                sub.push_str(&format!("\n문제\u{a0}확인용\u{a0}번호: {}", ids.join(" · ")));
             }
             let bx = x0 + w - one_w;
             let text_x = x0 + 30.0;
@@ -1109,7 +1111,7 @@ impl SettingsApp {
             w,
             Line::new(
                 "로그인 전에도 실행",
-                "PC 를 켠 직후의 로그인 화면과 잠금 화면에서도 가장자리로 밀면 넘어갑니다. 켜고 끌 때 관리자 승인이 필요하고, 「전환 관리」의 채널 배치를 그대로 씁니다. 켜기 전에 이 PC 에서 되는지 테스트해 볼 수 있습니다.",
+                "PC 를 켠 직후의 로그인 화면과 잠금 화면에서도 가장자리로 밀면 넘어갑니다. 켜고 끌 때 관리자 승인이 필요하고, 「전환 관리」의 채널 배치를 그대로 씁니다.",
             ),
             installed,
         );
@@ -1252,7 +1254,10 @@ impl SettingsApp {
                 let line = if i == 0 {
                     Line::new("이 PC 주소", "상대 PC 의 「상대 PC 주소」에 이 값만 넣습니다(포트는 넣지 않음).")
                 } else {
-                    Line::new("이 PC 의 다른 주소", "위 주소로 연결되지 않으면 이 주소를 넣어 보세요.")
+                    Line::new(
+                        "이 PC 의 다른 주소",
+                        "위 주소로 연결되지 않으면 상대 PC 의 「상대 PC 주소」에 이 주소를 넣어 보세요.",
+                    )
                 };
                 let copied = matches!(self.copied, Some((k, t)) if k == i && t.elapsed().as_secs_f32() < 2.0);
                 if copied {

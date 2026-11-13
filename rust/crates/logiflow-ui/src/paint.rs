@@ -56,16 +56,23 @@ pub enum Icon {
 
 /// 줄바꿈 전처리 — 「단추 이름」 안의 띄어쓰기와 「 · 」 앞 띄어쓰기를 줄바꿈 안 되는 공백으로 바꿔
 /// 이름이 두 줄로 쪼개지거나 줄 끝에 「·」만 남지 않게 한다.
+/// 영문·숫자 낱말 뒤 띄어 쓴 조사(「PC 로」 「Windows 에」)도 붙여 두어 조사만 다음 줄로 떨어지지 않게 한다.
 pub fn keep_together(text: &str) -> String {
+    let src: Vec<char> = text.replace("\r\n", "\n").replace(" · ", "\u{a0}· ").chars().collect();
     let mut out = String::with_capacity(text.len());
     let mut in_quote = false;
-    for ch in text.replace("\r\n", "\n").replace(" · ", "\u{a0}· ").chars() {
+    for (i, &ch) in src.iter().enumerate() {
         match ch {
             '「' => in_quote = true,
             '」' => in_quote = false,
             _ => {}
         }
-        out.push(if in_quote && ch == ' ' { '\u{a0}' } else { ch });
+        let glue_particle = ch == ' '
+            && i > 0
+            && (src[i - 1].is_ascii_alphanumeric() || src[i - 1] == ')')
+            && src.get(i + 1).map(|c| ('\u{AC00}'..='\u{D7A3}').contains(c)).unwrap_or(false)
+            && src[i + 1..].iter().take_while(|c| ('\u{AC00}'..='\u{D7A3}').contains(*c)).count() <= 2;
+        out.push(if (in_quote && ch == ' ') || glue_particle { '\u{a0}' } else { ch });
     }
     out
 }
