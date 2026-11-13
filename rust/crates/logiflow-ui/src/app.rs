@@ -70,6 +70,8 @@ pub struct SettingsApp {
     /// 방화벽 규칙 · 로그인 화면 테스트 작업이 있는지(None = 확인 중). 백그라운드로 조회.
     firewall_on: Arc<Mutex<Option<bool>>>,
     probe_installed: Arc<Mutex<Option<bool>>>,
+    /// 이 PC 주소(호스트 이름 조회라 느릴 수 있어 백그라운드 1회).
+    local_ips: Arc<Mutex<Option<Vec<String>>>>,
     canvas: Canvas,
     /// 채널 배치 되돌리기(바꾸기 전 배치를 쌓는다).
     layout_undo: Vec<Vec<EdgeAttachment>>,
@@ -97,8 +99,17 @@ pub struct Snapshot {
     pub done: Arc<std::sync::atomic::AtomicBool>,
 }
 
-fn spawn_check(slot: &Arc<Mutex<Option<bool>>>, f: fn() -> bool) {
-    *slot.lock().unwrap() = None;
+/// 이 PC 주소 다시 조회(설정 화면을 열 때마다 — 와이파이·VPN 으로 바뀌었을 수 있다). 조회 중엔 옛 값 유지.
+fn refresh_ips(slot: &Arc<Mutex<Option<Vec<String>>>>) {
+    let slot = slot.clone();
+    std::thread::spawn(move || {
+        let v = clipboard::local_ips();
+        *slot.lock().unwrap() = Some(v);
+    });
+}
+
+/// 백그라운드 상태 조회. 조회하는 동안은 옛 값을 그대로 보여 준다(처음에만 「확인 중…」).
+fn spawn_check(slot: &Arc<Mutex<Option<bool>>>, f: impl FnOnce() -> bool + Send + 'static) {
     let slot = slot.clone();
     std::thread::spawn(move || {
         let v = f();
@@ -118,9 +129,12 @@ impl SettingsApp {
             });
         }
         let firewall_on = Arc::new(Mutex::new(None));
-        spawn_check(&firewall_on, firewall::exists);
+        let port = shared.lock().unwrap().config.clip_port;
+        spawn_check(&firewall_on, move || firewall::allowed_for_port(port));
         let probe_installed = Arc::new(Mutex::new(None));
         spawn_check(&probe_installed, probe::is_installed);
+        let local_ips = Arc::new(Mutex::new(None));
+        refresh_ips(&local_ips);
         SettingsApp {
             shared,
             tray,
@@ -133,6 +147,7 @@ impl SettingsApp {
             prelogon_installed: installed,
             firewall_on,
             probe_installed,
+            local_ips,
             canvas: Canvas::default(),
             layout_undo: Vec::new(),
             copied_at: None,
@@ -333,6 +348,11 @@ impl eframe::App for SettingsApp {
             if nav_button(&sb, &format!("nav{}", i), 12.0, y, 158.0, nav_h, t, *ic, self.page == i) && self.page != i {
                 self.page = i;
                 self.offset = 0.0; // C#: 화면 바꾸면 맨 위로
+                if i == 1 {
+                    refresh_ips(&self.local_ips);
+                    let port = cfg.clip_port;
+                    spawn_check(&self.firewall_on, move || firewall::allowed_for_port(port));
+                }
             }
         }
         let h = full.height();
@@ -1015,16 +1035,18 @@ impl SettingsApp {
             y += h;
             // 이 PC 주소
             divider(pc, cx, y, w);
-            let ips = clipboard::local_ips();
+            let ips_state = self.local_ips.lock().unwrap().clone();
+            let ips = ips_state.clone().unwrap_or_default();
             let main_ip = ips.first().cloned();
             let mut desc = format!("상대 PC 의 「상대 PC 주소」에 이 값을 넣습니다. 포트 {}.", cfg.clip_port);
             if ips.len() > 1 {
                 desc.push_str(&format!(" 안 되면 다른 주소: {}", ips[1..].join(", ")));
             }
             let line = Line::new("이 PC 주소", desc);
-            let line = match &main_ip {
-                Some(ip) => line.value(ip.clone(), p.ink),
-                None => line.value("찾지 못함", p.warn),
+            let line = match (&main_ip, &ips_state) {
+                (Some(ip), _) => line.value(ip.clone(), p.ink),
+                (None, None) => line.value("찾는 중…", p.muted),
+                (None, Some(_)) => line.value("찾지 못함", p.warn),
             };
             let copied = self.copied_at.map(|t| t.elapsed().as_secs_f32() < 2.0).unwrap_or(false);
             if copied {
@@ -1096,7 +1118,8 @@ impl SettingsApp {
                 if let Some(t) = failed {
                     self.msg(t, "Windows 방화벽", MB_OK | MB_ICONWARNING);
                 }
-                spawn_check(&self.firewall_on, firewall::exists);
+                let port = cfg.clip_port;
+                spawn_check(&self.firewall_on, move || firewall::allowed_for_port(port));
             }
             y += h;
         }

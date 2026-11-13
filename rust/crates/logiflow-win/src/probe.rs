@@ -79,13 +79,15 @@ fn probe_loop(seconds: i32) {
             last_name = Some(name.clone());
         }
         if tick % 3 == 0 || set_err != 0 || !got {
+            // locked=Y — ARM 처럼 잠금 화면이 Default 데스크톱으로 보이는 PC 도 「잠금 화면 기록」으로 판정하게.
             append(&format!(
-                "desktop=\"{}\" setThreadDesktop={}(err{}) GetCursorPos={}(err{})",
+                "desktop=\"{}\" setThreadDesktop={}(err{}) GetCursorPos={}(err{}) locked={}",
                 name,
                 if set_err == 0 { "성공" } else { "실패" },
                 set_err,
                 if got { format!("({},{})", p.x, p.y) } else { "실패".into() },
-                cur_err
+                cur_err,
+                if crate::workers::is_locked() { "Y" } else { "N" }
             ));
         }
         if set_err == 0 && !original.is_invalid() {

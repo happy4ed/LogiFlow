@@ -14,16 +14,15 @@ pub const IROOT_INDEX: u8 = 0x00;
 pub const FEATURE_CHANGE_HOST: u16 = 0x1814;
 pub const FEATURE_DEVICE_NAME: u16 = 0x0005;
 
-/// 쓰기 허가표 — 이 crate 안에서만 만들 수 있다(필드가 비공개 · 복제 불가). OS 어댑터는 `HidTransport::write`
-/// 를 구현할 수는 있어도 부를 수는 없다. 그래서 기기로 나가는 모든 출력 리포트는 이 crate 의 조회(`call`)와
-/// 가드를 거친 `set_host` 에서만 나간다(계획서 3.1 의 2 「원시 쓰기는 비공개」를 구조로 강제).
-pub struct WriteToken {
-    _private: (),
-}
+/// 기기로 나갈 출력 리포트 — 이 crate 안에서만 만들 수 있다(필드 비공개 · 복제 불가). `HidTransport::write` 는
+/// 이것만 받으므로 OS 어댑터·설정 창은 내용을 정한 리포트를 보낼 수 없고, 나가는 바이트는 언제나 이 crate 의
+/// 조회(`call`)나 가드를 거친 `set_host` 가 만든 것이다(계획서 3.1 의 2 「원시 쓰기는 비공개」를 구조로 강제).
+/// 어댑터는 호출 동안 빌린 참조만 받으므로 보관해 두었다가 나중에 다시 보낼 수도 없다.
+pub struct OutReport(Vec<u8>);
 
-impl WriteToken {
-    pub(crate) fn new() -> Self {
-        WriteToken { _private: () }
+impl OutReport {
+    pub fn bytes(&self) -> &[u8] {
+        &self.0
     }
 }
 
@@ -31,8 +30,8 @@ impl WriteToken {
 pub trait HidTransport {
     /// 출력 리포트 길이(바이트, 리포트 ID 포함). 0 이면 모름.
     fn output_report_len(&self) -> usize;
-    /// 출력 리포트 전송. 시간 초과·실패 시 false. `WriteToken` 은 이 crate 만 만들 수 있다.
-    fn write(&mut self, report: &[u8], timeout_ms: u32, token: WriteToken) -> bool;
+    /// 출력 리포트 전송. 시간 초과·실패 시 false. `OutReport` 는 이 crate 만 만들 수 있다.
+    fn write(&mut self, report: &OutReport, timeout_ms: u32) -> bool;
     /// 입력 리포트 1건 수신. 시간 초과 시 None.
     fn read(&mut self, timeout_ms: u32) -> Option<Vec<u8>>;
 }
@@ -99,10 +98,10 @@ impl<'a> HidppDevice<'a> {
     /// HID++ 호출. Ok(None) = 시간 초과, Err = 오류 응답.
     pub(crate) fn call(&mut self, device_index: u8, feature_index: u8, func_index: u8, params: &[u8], timeout_ms: u32) -> Result<Option<[u8; 16]>, HidppError> {
         let fb = func_byte(func_index);
-        let report = build_report(self.t.output_report_len(), device_index, feature_index, func_index, params);
-        self.log.tx(device_index, &report);
+        let report = OutReport(build_report(self.t.output_report_len(), device_index, feature_index, func_index, params));
+        self.log.tx(device_index, report.bytes());
 
-        if !self.t.write(&report, timeout_ms, WriteToken::new()) {
+        if !self.t.write(&report, timeout_ms) {
             self.log
                 .timeout(&format!("Write dev=0x{:02X} feat=0x{:02X} func={}", device_index, feature_index, func_index));
             return Ok(None);
@@ -191,15 +190,15 @@ impl<'a> HidppDevice<'a> {
     /// 0x1814 func1 setHost — 호스트 전환(쓰기). crate 안 `switcher` 에서만 호출한다.
     /// 기기가 전환 즉시 연결을 리셋하므로 응답을 기다리지 않는다. drain_ms=0 이면 바로 돌아온다(묶음 전송).
     pub(crate) fn set_host(&mut self, device_index: u8, change_host_index: u8, target_host: u8, write_timeout_ms: u32, drain_ms: u32) -> bool {
-        let report = build_report(self.t.output_report_len(), device_index, change_host_index, 1, &[target_host]);
+        let report = OutReport(build_report(self.t.output_report_len(), device_index, change_host_index, 1, &[target_host]));
         self.log.log(&format!(
             "TX(setHost) dev=0x{:02X} feat=0x{:02X} target={}  [{}]",
             device_index,
             change_host_index,
             target_host,
-            DiagLogger::hex(&report)
+            DiagLogger::hex(report.bytes())
         ));
-        if !self.t.write(&report, write_timeout_ms, WriteToken::new()) {
+        if !self.t.write(&report, write_timeout_ms) {
             self.log.error(&format!("setHost 전송 실패 dev=0x{:02X}", device_index));
             return false;
         }

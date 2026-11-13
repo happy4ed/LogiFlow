@@ -361,7 +361,7 @@ fn rescan() {
         Some(l) => l,
         None => return,
     };
-    update_tray(Some("스캔 중..."));
+    update_tray(Some("기기 찾는 중…"));
     push_state(); // 진단 화면에 즉시 '스캔 중…'
     std::thread::spawn(move || {
         let results = scan::scan(&WinHidBackend, &log);
@@ -459,10 +459,19 @@ pub fn write_logon_edges(cfg: &AppConfig) {
     let names = monitors::names(&monitors::all());
     let path = paths::logon_edges_path();
     let tmp = path.with_extension("tmp");
-    if write_utf8_bom(&tmp, &logon_edges::serialize(cfg, &names)).is_ok() && std::fs::rename(&tmp, &path).is_err() {
+    if write_utf8_bom(&tmp, &logon_edges::serialize(cfg, &names)).is_err() {
         let _ = std::fs::remove_file(&tmp);
-        let _ = write_utf8_bom(&path, &logon_edges::serialize(cfg, &names));
+        return;
     }
+    // 원본에 직접 덮어쓰는 대체 경로는 두지 않는다(반쯤 쓴 파일을 워커가 읽을 수 있어서). 바꿔 끼우기가 끝내
+    // 실패하면 옛 파일이 그대로 남고 다음 설정 변경 때 다시 쓴다.
+    for _ in 0..5 {
+        if std::fs::rename(&tmp, &path).is_ok() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(40));
+    }
+    let _ = std::fs::remove_file(&tmp);
 }
 
 pub fn remove_logon_edges() {

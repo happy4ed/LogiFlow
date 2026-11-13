@@ -37,7 +37,8 @@ pub fn verdict(lines: &[String]) -> ProbeVerdict {
         let Some(i) = l.find("desktop=\"") else { continue };
         let rest = &l[i + "desktop=\"".len()..];
         let Some(end) = rest.find('"') else { continue };
-        if rest[..end].eq_ignore_ascii_case("Default") {
+        // 보안 데스크톱(이름 ≠ Default) 또는 잠금 표시(ARM 은 잠금 화면도 Default).
+        if rest[..end].eq_ignore_ascii_case("Default") && !l.contains("locked=Y") {
             continue;
         }
         secure_lines += 1;

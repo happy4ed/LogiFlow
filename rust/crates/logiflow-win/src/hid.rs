@@ -1,6 +1,6 @@
 //! Windows HID 전송 — C# `HidEnumerator`·`HidStream` 이식(SetupAPI 열거 · 공유 모드 · 오버랩드 타임아웃).
 
-use logiflow_core::hidpp::{HidTransport, WriteToken};
+use logiflow_core::hidpp::{HidTransport, OutReport};
 use logiflow_core::scan::{HidBackend, HidInterfaceInfo};
 use windows::core::{GUID, PCWSTR};
 use windows::Win32::Devices::DeviceAndDriverInstallation::*;
@@ -227,8 +227,9 @@ impl HidTransport for HidStream {
         self.output_len
     }
 
-    /// 코어만 `WriteToken` 을 만들 수 있으므로 이 crate·설정 창에서는 부를 수 없다(구현만 여기).
-    fn write(&mut self, report: &[u8], timeout_ms: u32, _token: WriteToken) -> bool {
+    /// 코어가 만든 `OutReport` 만 보낸다 — 이 crate·설정 창은 리포트 내용을 정할 수 없다(구현만 여기).
+    fn write(&mut self, report: &OutReport, timeout_ms: u32) -> bool {
+        let report = report.bytes();
         let len = if self.output_len > 0 { self.output_len } else { report.len() };
         let mut buf = vec![0u8; len];
         let n = report.len().min(len);

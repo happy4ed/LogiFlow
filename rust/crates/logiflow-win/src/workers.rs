@@ -359,6 +359,8 @@ pub fn run_desktop_switch() {
     };
     say("==================================================");
     say("desktop-switch(B) 워커 시작 — Default 데스크탑 raw 엣지 전환");
+    // 수정 시각을 먼저 잡는다 — 읽은 뒤 시작 준비(스캔) 중에 파일이 바뀌면 첫 타이머에서 다시 적용되게.
+    let started_mtime = edges_mtime();
     let cfg = read_edges();
     let attachments = attachments_of(&cfg);
     say(&format!("엣지 {}개 · dwell={}ms", attachments.len(), cfg.dwell_ms));
@@ -444,7 +446,7 @@ pub fn run_desktop_switch() {
     let off = std::cell::Cell::new(0);
     // 서비스가 켜진 채 「끌기 중 전환 막기」·배치·머무는 시간을 바꾸면 1초 안에 판정기에 다시 적용
     // (트레이가 logon-edges 를 새로 쓰면 수정 시각이 바뀐다). 지금 판은 워커가 다시 뜰 때까지 옛 값이었다.
-    let applied = std::cell::RefCell::new((edges_mtime(), cfg));
+    let applied = std::cell::RefCell::new((started_mtime, cfg));
     let timer_handler: wnd::Handler = Rc::new(move |_h, msg, _w, _l| {
         if msg == WM_TIMER {
             let m = edges_mtime();

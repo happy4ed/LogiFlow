@@ -26,14 +26,22 @@ pub fn request_remove() -> bool {
     run_elevated_self("--remove-firewall", 15000)
 }
 
-/// 상승된 인스턴스(`--remove-firewall`).
+/// 상승된 인스턴스(`--remove-firewall`). 지우기 명령이 성공했거나, 실패했어도 규칙이 없으면 0.
 pub fn do_remove() -> i32 {
-    remove();
-    if exists() {
-        1
-    } else {
+    let (rc, _) = run_hidden("netsh.exe", &format!("advfirewall firewall delete rule name=\"{}\"", FIREWALL_RULE), 10000);
+    if rc == 0 || !exists() {
         0
+    } else {
+        1
     }
+}
+
+/// 이 포트가 우리 규칙으로 열려 있나 — 규칙이 있어도 포트가 다르면(설정 파일에서 포트를 바꾼 경우) false.
+/// 조회 실패(방화벽 서비스 꺼짐 등)도 false 로 보고 「허용」을 다시 누를 수 있게 둔다.
+pub fn allowed_for_port(port: i32) -> bool {
+    let (rc, out) = run_hidden("netsh.exe", &format!("advfirewall firewall show rule name=\"{}\"", FIREWALL_RULE), 10000);
+    let p = port.to_string();
+    rc == 0 && out.split(|c: char| !c.is_ascii_digit()).any(|tok| tok == p)
 }
 
 /// 제거 정리(상승된 인스턴스).

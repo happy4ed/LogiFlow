@@ -56,7 +56,8 @@ impl HidTransport for FakeStream {
     fn output_report_len(&self) -> usize {
         self.out_len
     }
-    fn write(&mut self, report: &[u8], _t: u32, _token: crate::hidpp::WriteToken) -> bool {
+    fn write(&mut self, report: &crate::hidpp::OutReport, _t: u32) -> bool {
+        let report = report.bytes();
         self.shared.lock().unwrap().writes.push((self.path.clone(), report.to_vec()));
         let (rid, dev, feat, fb) = (report[0], report[1], report[2], report[3]);
         let func = fb >> 4;
@@ -451,6 +452,12 @@ fn probe_result_reads_last_run() {
         verdict(&l(&[base, "11:19:40.000  OpenInputDesktop 실패 (입력 데스크톱 접근 거부) err=5", end])),
         ProbeVerdict::Blocked
     );
+    // ARM: 잠금 화면이 Default 로 보여도 locked=Y 면 잠금 화면 기록.
+    let a1 = "11:19:40.000  desktop=\"Default\" setThreadDesktop=성공(err0) GetCursorPos=(10,20)(err0) locked=Y";
+    let a2 = "11:19:41.800  desktop=\"Default\" setThreadDesktop=성공(err0) GetCursorPos=(90,20)(err0) locked=Y";
+    let a0 = "11:19:42.000  desktop=\"Default\" setThreadDesktop=성공(err0) GetCursorPos=(5,5)(err0) locked=N";
+    assert_eq!(verdict(&l(&[base, a0, a1, a2, end])), ProbeVerdict::Works);
+    assert_eq!(verdict(&l(&[base, a0, end])), ProbeVerdict::NoSecureScreen);
     // 앞 실행이 성공이어도 마지막 실행 기준.
     assert_eq!(verdict(&l(&[base, w1, w2, end, base, def, end])), ProbeVerdict::NoSecureScreen);
 }
