@@ -77,8 +77,8 @@ pub struct SettingsApp {
     layout_undo: Vec<Vec<EdgeAttachment>>,
     /// 「복사」를 누른 주소 번호와 시각(2초 동안 「복사함」).
     copied: Option<(usize, Instant)>,
-    /// 「보내 보기」 마지막 결과(연결됨?, 시:분).
-    last_link: Option<(bool, String)>,
+    /// 「보내 보기」 마지막 결과(연결됨?, 시:분, 확인할 때의 주소·포트·암호문구 — 바뀌면 결과를 보이지 않음).
+    last_link: Option<(bool, String, String)>,
     /// 「로그인 화면 테스트 열기」 — 진단 화면을 열고 테스트 묶음까지 내려간다.
     jump_test: bool,
     test_y: f32,
@@ -365,14 +365,18 @@ impl eframe::App for SettingsApp {
             }
         }
         let h = full.height();
-        let ver_h = sb.line_h(8.0, false);
-        let st_h = sb.line_h(8.5, false);
+        // 사이드바 아래 상태·버전 — 사이드바 폭 안에서 줄바꿈(크게 단계에서도 잘리지 않게).
+        let ver = format!("v{}", self.version);
+        let ver_h = sb.wrap_h(&ver, 8.0, false, SIDEBAR_W - 28.0);
+        let st_w = SIDEBAR_W - 54.0 - 8.0;
+        let st_h = sb.wrap_h("LogiFlow 실행 중", 8.5, false, st_w);
+        let line1 = sb.line_h(8.5, false);
         let ver_y = h - 14.0 - ver_h;
         let status_y = ver_y - 10.0 - st_h;
-        sb.icon(Icon::Plug, 18.0, status_y + (st_h - 16.0) / 2.0, 16.0, pal.muted);
-        sb.icon(Icon::Dot, 38.0, status_y + (st_h - 16.0) / 2.0, 16.0, pal.ok);
-        sb.text(54.0, status_y, "LogiFlow 실행 중", 8.5, false, pal.muted);
-        sb.text(20.0, ver_y, &format!("v{}", self.version), 8.0, false, pal.muted);
+        sb.icon(Icon::Plug, 18.0, status_y + (line1 - 16.0) / 2.0, 16.0, pal.muted);
+        sb.icon(Icon::Dot, 38.0, status_y + (line1 - 16.0) / 2.0, 16.0, pal.ok);
+        sb.wrap(54.0, status_y, st_w, "LogiFlow 실행 중", 8.5, false, pal.muted);
+        sb.wrap(20.0, ver_y, SIDEBAR_W - 28.0, &ver, 8.0, false, pal.muted);
 
         // ---- 페이지(테마 스크롤) ----
         let host = Rect::from_min_max(Pos2::new(full.left() + SIDEBAR_W, full.top()), full.max);
@@ -401,6 +405,7 @@ impl eframe::App for SettingsApp {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(host));
         child.set_clip_rect(Rect::from_min_max(host.min, Pos2::new(host.left() + vw, host.bottom())).intersect(ui.clip_rect()));
         let origin = Pos2::new(host.left(), host.top() - self.offset);
+        let drawn_page = self.page;
         let content_h = {
             let pc = Pc {
                 ui: &child,
@@ -417,7 +422,8 @@ impl eframe::App for SettingsApp {
             }
         };
         self.content_h = content_h;
-        if self.jump_test && self.page == 2 {
+        // 진단 화면을 실제로 그려 테스트 묶음 위치(test_y)를 안 다음 프레임에 내려간다.
+        if self.jump_test && drawn_page == 2 && self.page == 2 {
             self.jump_test = false;
             self.offset = (self.test_y - 12.0).max(0.0);
             ctx.request_repaint();
@@ -926,7 +932,11 @@ impl SettingsApp {
             });
         }
         let r = self.menu(ctx, anchor, &items);
-        (200..216).contains(&r).then_some((r - 200) as i32)
+        if (200..216).contains(&r) {
+            Some((r - 200) as i32)
+        } else {
+            None
+        }
     }
 
     fn device_switch_menu(&mut self, ctx: &egui::Context, anchor: Pos2, d: &ScanResult, max_host: i32, cfg: &AppConfig) {
@@ -1152,7 +1162,15 @@ impl SettingsApp {
                             text: "지우기".into(),
                             enabled: true,
                         }];
-                        if self.menu(ctx, anchor, &items) == 300 && self.ask(&format!("{} 을 지울까요?\r\n지우면 클립보드를 주고받지 않습니다.", lab), lab)
+                        if self.menu(ctx, anchor, &items) == 300
+                            && self.ask(
+                                if is_secret {
+                                    "암호문구를 지울까요?\r\n지우면 클립보드를 주고받지 않습니다."
+                                } else {
+                                    "상대 PC 주소를 지울까요?\r\n지우면 클립보드를 주고받지 않습니다."
+                                },
+                                lab,
+                            )
                         {
                             if is_secret {
                                 self.apply(|c| c.clip_secret = String::new());
@@ -1207,10 +1225,11 @@ impl SettingsApp {
             // 연결 확인 — 마지막 결과를 상태로 남긴다.
             divider(pc, cx, y, w);
             let line = Line::new("연결 확인", "상대 PC 로 시험 글을 한 번 보냅니다. 상대 PC 에서 붙여 넣어 확인하세요.");
+            let link_key = format!("{}|{}|{}", cfg.clip_peer_host, cfg.clip_port, cfg.clip_secret);
             let line = match &self.last_link {
-                None => line.value("아직 확인 안 함", p.muted),
-                Some((true, t)) => line.value(format!("연결됨 · {}", t), p.ink),
-                Some((false, t)) => line.value(format!("연결 안 됨 · {}", t), p.warn),
+                Some((true, t, k)) if *k == link_key => line.value(format!("연결됨 · {}", t), p.ink),
+                Some((false, t, k)) if *k == link_key => line.value(format!("연결 안 됨 · {}", t), p.warn),
+                _ => line.value("아직 확인 안 함", p.muted),
             };
             let (hit, h) = buttons_row(pc, "ctest", cx, y, w, line, &[("보내 보기", None, Variant::Default)]);
             if hit.is_some() {
@@ -1226,7 +1245,7 @@ impl SettingsApp {
                 };
                 if let Some(ok) = ok {
                     let hm = logiflow_win::session::local_time_hms().get(..5).unwrap_or("").to_string();
-                    self.last_link = Some((ok, hm));
+                    self.last_link = Some((ok, hm, link_key.clone()));
                 }
                 self.msg(&r, "연결 확인", MB_OK | MB_ICONINFORMATION);
             }
