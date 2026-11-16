@@ -62,5 +62,39 @@ grep -q "Swift 판 설정 이어받음" "$SUP/logs/logiflow-diag.log"
 kill "$UI" || true
 kill "$AGENT" || true
 sleep 1
+
+# 4) 0.16.0 Mac 판처럼 config.txt 에 평문 암호문구가 있을 때 → 키체인으로 옮기고 파일 평문을 지우는지.
+#    키체인을 못 쓰는 러너(KEYCHAIN_OK=0)면: 평문으로 대신 쓰지 않고 파일을 그대로 두는지(암호문구를 잃지 않음).
+SECRET="시험 암호문구 $RANDOM"
+python3 - "$SUP/config.txt" "$SECRET" <<'PY'
+import sys
+p, sec = sys.argv[1], sys.argv[2]
+lines = open(p, encoding='utf-8-sig').read().splitlines()
+lines = [l for l in lines if not l.startswith('clipSecret')]
+lines.append('clipSecret=' + sec)
+open(p, 'w', encoding='utf-8').write('\n'.join(lines) + '\n')
+PY
+rm -f "$SUP/agent.sock"
+"$EXE" --autostart >> "$SNAP/agent-stdout.txt" 2>&1 &
+AGENT=$!
+for _ in $(seq 1 40); do [ -S "$SUP/agent.sock" ] && break; sleep 0.5; done
+sleep 3
+kill -0 "$AGENT"
+echo "--- config.txt(옮긴 뒤)"; sed 's/^clipSecret=.*/clipSecret=<가림>/' "$SUP/config.txt"
+if [ "${KEYCHAIN_OK:-0}" = 1 ]; then
+  if grep -q '^clipSecret=.\+' "$SUP/config.txt"; then echo "평문 암호문구가 파일에 남음"; kill "$AGENT"; exit 1; fi
+  grep -q '^clipSecretDpapi=keychain' "$SUP/config.txt" || { echo "키체인 표시 없음"; kill "$AGENT"; exit 1; }
+  GOT=$(security find-generic-password -s com.happy4ed.logiflow.rs -a clipSecret -w)
+  [ "$GOT" = "$SECRET" ] || { echo "키체인 값이 다름"; kill "$AGENT"; exit 1; }
+  echo "암호문구 키체인 옮기기 ok"
+else
+  grep -q "^clipSecret=$SECRET" "$SUP/config.txt" || { echo "키체인 실패인데 파일 암호문구가 사라짐"; kill "$AGENT"; exit 1; }
+  grep -q "키체인 옮기기 실패" "$SUP/logs/logiflow-diag.log" || { echo "키체인 실패 기록 없음"; kill "$AGENT"; exit 1; }
+  echo "키체인 못 씀(러너) — 파일 그대로 · 기록 남김 ok"
+fi
+grep "키체인" "$SUP/logs/logiflow-diag.log" || true
+kill "$AGENT" || true
+sleep 1
+security delete-generic-password -s com.happy4ed.logiflow.rs -a clipSecret >/dev/null 2>&1 || true
 defaults delete com.happy4ed.logiflow || true
 echo "mac smoke ok"

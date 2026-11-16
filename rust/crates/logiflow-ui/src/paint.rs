@@ -10,7 +10,8 @@ pub fn c(rgb: Rgb) -> Color32 {
     Color32::from_rgb(rgb.0, rgb.1, rgb.2)
 }
 
-pub const MIN_PT: f32 = 9.5;
+/// 0.16.1: 9.5 → 9.75pt(= 13px). 「작게」에서 설명 글이 13px 아래로 내려가 읽기 힘들었다(첫 사용 점검).
+pub const MIN_PT: f32 = 9.75;
 
 /// C# UiFont.Get(basePt) — pt = base + 단계 가산 + 1, 최소 9.5pt. egui 크기 = em(px) = pt × 96/72.
 /// rs.3: 모든 글자를 1pt 키웠다. C# 은 설명 글(8.5pt)이 「작게」(−1)와 「보통」(+1) 모두 최소 9.5pt 에 걸려
@@ -47,6 +48,7 @@ pub enum Icon {
     Pencil,
     Edge,
     Monitor,
+    Laptop,
     Dot,
     /// 단추 글자 오른쪽에 붙는 ▾(누르면 고르는 메뉴가 열림).
     ChevronDown,
@@ -550,9 +552,18 @@ pub fn draw_icon(p: &Painter, ic: Icon, r: Rect, col: Color32) {
             p.line_segment([pt(12.0, 16.0), pt(12.0, 20.0)], pen(1.7));
         }
         Icon::ChevronDown => line(vec![pt(5.0, 9.0), pt(12.0, 16.0), pt(19.0, 9.0)], 2.2),
+        Icon::Laptop => {
+            // 화면 + 아래 받침(키보드 면).
+            rounded(5.0, 5.0, 14.0, 10.0, 1.5, 1.7);
+            line(vec![pt(2.5, 18.5), pt(21.5, 18.5)], 1.9);
+            line(vec![pt(5.0, 15.0), pt(2.5, 18.5)], 1.7);
+            line(vec![pt(19.0, 15.0), pt(21.5, 18.5)], 1.7);
+        }
         Icon::More => {
-            for yy in [5.5, 12.0, 18.5] {
-                p.circle_filled(pt(12.0, yy), 1.9 * u, col);
+            // 더 보기 — Mac 은 가로 「⋯」(Mac 관례), Windows 는 세로 「⋮」.
+            for v in [5.5, 12.0, 18.5] {
+                let at = if cfg!(target_os = "macos") { pt(v, 12.0) } else { pt(12.0, v) };
+                p.circle_filled(at, 1.9 * u, col);
             }
         }
         Icon::Dot => {

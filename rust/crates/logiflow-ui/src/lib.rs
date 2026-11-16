@@ -86,6 +86,8 @@ mod snap {
         }
         steps.push((0, false, 1, true, 2)); // 기기 자세히 보기
         steps.push((0, false, 3, true, 2));
+        steps.push((0, false, 1, false, 5)); // 기기를 못 찾았을 때(빈 화면 안내)
+        steps.push((0, true, -1, false, 5));
         (shared, steps)
     }
 
@@ -98,6 +100,7 @@ mod snap {
             frames: 0,
             requested: false,
             done: Default::default(),
+            stash: Vec::new(),
         });
         app
     }
@@ -461,6 +464,7 @@ mod mac {
                             s.devices = cache::parse(&lines);
                             s.scanning = st.scanning;
                             s.clip_running = st.clip_running;
+                            s.secret_note = (!st.secret_note.is_empty()).then_some(st.secret_note);
                         }
                         ipc::SWITCH_RESULT => s.switch_result = Some(text == "1"),
                         ipc::ACTIVATE => s.activate = true,

@@ -11,6 +11,7 @@ use super::ffi::{cf_bool, cf_bytes, cfstr};
 use super::glow_mac;
 use super::hid::MacHidBackend;
 use super::ipc;
+use super::keychain;
 use super::mainq;
 use super::monitors;
 use super::notify::{self, menu_item};
@@ -64,22 +65,58 @@ fn with<R>(f: impl FnOnce(&mut Tray) -> R) -> Option<R> {
 
 // ---- 설정 파일 ----
 
+/// 설정 저장 — 암호문구는 키체인에(파일에는 `clipSecretDpapi=keychain` 표시만). 키체인이 실패하면 파일에
+/// 암호문구를 쓰지 않는다(평문으로 대신 쓰지 않음 · 설정 창에 주의 글). 비운 암호문구는 키체인에서도 지운다.
 fn save_config(cfg: &AppConfig) {
     paths::ensure_support_dir();
     let path = paths::config_path();
-    let _ = cfg.save(&path, None);
-    // 클립보드 암호문구가 들어 있으니 이 사용자만 읽게.
+    if cfg.clip_secret.is_empty() {
+        keychain::delete();
+    }
+    let _ = keychain::with_codec(|c| cfg.save(&path, Some(c)));
     use std::os::unix::fs::PermissionsExt;
     let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
 }
 
 fn load_config() -> AppConfig {
-    AppConfig::load(&paths::config_path(), None)
+    keychain::with_codec(|c| AppConfig::load(&paths::config_path(), Some(c)))
 }
 
-/// 설정 창이 상주 앱 없이도 쓰는 설정 읽기.
+/// 0.16.0 Mac 판은 암호문구를 config.txt 에 평문(`clipSecret=…`)으로 두었다 — 키체인으로 옮기고, 저장·되읽기가
+/// 맞으면 파일을 평문 없이 다시 쓴다. 키체인이 실패하면 파일은 그대로 둔다(암호문구를 잃지 않게, 다음 실행에 다시 시도).
+fn migrate_plain_secret(cfg: &AppConfig, log: &DiagLogger) {
+    let lines = logiflow_core::log::read_lines(&paths::config_path()).unwrap_or_default();
+    let plain = lines.iter().any(|l| {
+        l.trim_start_matches('\u{feff}')
+            .strip_prefix("clipSecret=")
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    });
+    if !plain || cfg.clip_secret.is_empty() {
+        return;
+    }
+    match keychain::store(&cfg.clip_secret) {
+        Ok(()) => {
+            save_config(cfg);
+            let still = logiflow_core::log::read_lines(&paths::config_path()).unwrap_or_default().iter().any(|l| {
+                l.trim_start_matches('\u{feff}')
+                    .strip_prefix("clipSecret=")
+                    .map(|v| !v.trim().is_empty())
+                    .unwrap_or(false)
+            });
+            log.log(if still {
+                "암호문구 키체인 옮기기: 키체인 저장은 됐으나 파일 평문이 남음"
+            } else {
+                "암호문구를 키체인으로 옮김(설정 파일의 평문 지움)"
+            });
+        }
+        Err(e) => log.error(&format!("암호문구 키체인 옮기기 실패 — 파일 그대로 둠: {}", e)),
+    }
+}
+
+/// 설정 창이 상주 앱 없이도 쓰는 설정 읽기(암호문구는 읽지 않는다 — 상주 앱 상태로 받는다).
 pub fn read_config_direct() -> AppConfig {
-    load_config()
+    AppConfig::load(&paths::config_path(), None)
 }
 
 /// Windows 의 로그인 전 실행 배치 파일(Mac 에는 없음).
@@ -310,6 +347,10 @@ pub fn run(show_window: bool) {
     }
     let config = load_config();
     log.set_enabled(config.diag_log_enabled);
+    migrate_plain_secret(&config, &log);
+    if let Some(n) = keychain::note() {
+        log.error(&format!("암호문구 키체인: {}", n));
+    }
 
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
@@ -540,6 +581,10 @@ fn apply_config(new_cfg: AppConfig) {
     let Some((cfg, log)) = r else {
         return;
     };
+    if let Some(n) = keychain::note() {
+        log.error(&format!("암호문구 키체인: {}", n));
+        notify::balloon("LogiFlow", &n);
+    }
     apply_autostart(cfg.auto_start);
     glow_mac::set_theme(cfg.theme);
     clipboard::apply(&cfg, &log);
@@ -579,6 +624,7 @@ fn state_text(t: &Tray) -> String {
         clip_running: clipboard::running(),
         config_plain: t.config.serialize(None),
         devices: cache::serialize(&t.last_results),
+        secret_note: keychain::note().unwrap_or_default(),
     })
 }
 

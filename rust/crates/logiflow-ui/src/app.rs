@@ -44,6 +44,8 @@ pub struct Shared {
     pub clip_running: bool,
     pub switch_result: Option<bool>,
     pub activate: bool,
+    /// 암호문구 보관 문제(Mac 키체인에 저장·읽기 실패) — 암호문구 줄에 주의 글로. Windows 는 늘 None.
+    pub secret_note: Option<String>,
 }
 
 struct Modal {
@@ -107,6 +109,8 @@ pub struct Snapshot {
     pub frames: u32,
     pub requested: bool,
     pub done: Arc<std::sync::atomic::AtomicBool>,
+    /// 「기기 없음」 단계 동안 치워 둔 기기 목록.
+    pub stash: Vec<ScanResult>,
 }
 
 /// 이 PC 주소 다시 조회(설정 화면을 열 때마다 — 와이파이·VPN 으로 바뀌었을 수 있다). 조회 중엔 옛 값 유지.
@@ -303,9 +307,9 @@ fn connection_text(raw: &str) -> (String, Option<String>) {
 /// 확인 상자 끝줄 — 이 PC 로 되돌아오는 길(전환하면 이 PC 에서 마우스·키보드를 잃으므로).
 fn come_back(this_channel: i32) -> String {
     if this_channel >= 0 {
-        format!("이 PC 로 되돌리려면 기기의 Easy-Switch 단추에서 {}번을 누르세요.", this_channel + 1)
+        format!("이 PC 로 되돌리려면 기기의 Easy-Switch 버튼에서 {}번을 누르세요.", this_channel + 1)
     } else {
-        "이 PC 로 되돌리려면 기기의 Easy-Switch 단추에서 이 PC 의 채널 번호를 누르세요.".into()
+        "이 PC 로 되돌리려면 기기의 Easy-Switch 버튼에서 이 PC 의 채널 번호를 누르세요.".into()
     }
 }
 
@@ -320,7 +324,7 @@ fn come_back_all(sw: &[ScanResult], current: i32) -> String {
         .filter(|d| d.current_host >= 0)
         .map(|d| format!("{} {}번", d.device_name, d.current_host + 1))
         .collect();
-    format!("이 PC 로 되돌리려면 기기마다 Easy-Switch 단추에서 지금 번호를 누르세요({}).", each.join(" · "))
+    format!("이 PC 로 되돌리려면 기기마다 Easy-Switch 버튼에서 지금 번호를 누르세요({}).", each.join(" · "))
 }
 
 fn log_dir() -> std::path::PathBuf {
@@ -390,12 +394,11 @@ impl eframe::App for SettingsApp {
             id_base: Id::unique("sidebar"),
         };
         sb.fill(0.0, 0.0, SIDEBAR_W, full.height(), pal.sidebar);
-        sb.icon(Icon::Mark, 16.0, 23.0, 18.0, pal.accent);
-        sb.text(42.0, 22.0, "LogiFlow", 10.0, true, pal.ink);
+        // 0.16.1: 사이드바 맨 위 앱 이름(아이콘 + LogiFlow)은 뺐다 — 창 제목 막대와 두 번 보였다(첫 사용 점검).
         let nav = [("전환 관리", Icon::Swap), ("설정", Icon::Gear), ("진단", Icon::Diag)];
         let nav_h = (sb.line_h(9.5, false) + 14.0).max(36.0);
         for (i, (t, ic)) in nav.iter().enumerate() {
-            let y = 62.0 + i as f32 * (nav_h + 4.0);
+            let y = 18.0 + i as f32 * (nav_h + 4.0);
             if nav_button(&sb, &format!("nav{}", i), 12.0, y, 158.0, nav_h, t, *ic, self.page == i) && self.page != i {
                 self.page = i;
                 self.offset = 0.0; // C#: 화면 바꾸면 맨 위로
@@ -608,7 +611,7 @@ impl SettingsApp {
             pc,
             w,
             "전환 관리",
-            "채널은 마우스·키보드의 Easy-Switch 단추 번호(1~3)이고, 단추마다 PC 가 하나씩 짝지어져 있습니다. 채널 상자를 끌어 이 PC 모니터의 가장자리에 붙이고, 하나만 떼려면 그 상자를 모니터에서 멀리 끌어 놓으세요. 잠깐 끄려면 아래 「가장자리 자동 전환」의 「사용」을 끄면 됩니다.",
+            "채널은 마우스·키보드의 Easy-Switch 버튼 번호(1~3)이고, 버튼마다 PC 가 하나씩 짝지어져 있습니다.",
         );
 
         // 이전 판이 남아 트레이가 가장자리 감시를 멈춘 상태 — 화면 맨 위에서 바로 정리(캔버스·스위치만 보고
@@ -677,25 +680,57 @@ impl SettingsApp {
         ) {
             self.set_layout(cfg, att);
         }
+        // 기기를 못 찾아 채널 상자가 없을 때 — 캔버스 안에 이유와 할 일(0.16.1 첫 사용 점검: 모니터만 보여 막힘).
+        if channels.is_empty() {
+            let msg = if scanning {
+                "기기를 찾는 중입니다…"
+            } else {
+                "로지텍 마우스·키보드를 찾지 못해 붙일 채널 상자가 없습니다. 기기를 켜거나 리시버를 꽂은 뒤 「다시 찾기」를 누르세요."
+            };
+            let mw = (w - 48.0).min(460.0);
+            let mh = pc.wrap_h(msg, DESC, false, mw);
+            let bw = pc.btn_w("다시 찾기", Some(Icon::Refresh));
+            let bh = pc.btn_h();
+            let total = mh + 10.0 + bh;
+            let my = y + canvas_h - total - 18.0;
+            let mx = x0 + (w - mw) / 2.0;
+            pc.fill(mx - 12.0, my - 10.0, mw + 24.0, total + 20.0, p.section);
+            pc.wrap(mx, my, mw, msg, DESC, false, p.muted);
+            if pc.button(
+                "rescan0",
+                x0 + (w - bw) / 2.0,
+                my + mh + 10.0,
+                bw,
+                bh,
+                "다시 찾기",
+                Some(Icon::Refresh),
+                Variant::Default,
+                !scanning,
+            ) {
+                self.rescan();
+            }
+        }
         y += canvas_h + 8.0;
-        // 캔버스 바로 아래 오른쪽 「되돌리기」(배치를 바꾼 적이 있을 때). rs.4: 「채널 모두 떼기」는 뺐다 — 결과가
+        // 캔버스 바로 아래 한 줄: 왼쪽 붙이기·떼기 방법(상단 설명에 묻혀 있던 것을 캔버스 옆으로 — 0.16.1 첫 사용 점검),
+        // 오른쪽 「되돌리기」(배치를 바꾼 적이 있을 때 · Ctrl+Z / ⌘Z 도 같음). rs.4: 「채널 모두 떼기」는 뺐다 — 결과가
         // 「사용」 스위치를 끈 것과 같아(밀어도 안 넘어감) 잠깐 끄려던 사람이 배치를 지우게 됐다(8차 첫 사용 점검).
-        // 하나씩 떼기는 상자를 멀리 끌어 놓으면 되고, 실수는 「되돌리기」로.
         let bh = pc.btn_h();
-        let mut row = false;
-        if !self.layout_undo.is_empty() {
-            let uw = pc.btn_w("되돌리기", None);
-            if pc.button("undo", x0 + w - uw, y, uw, bh, "되돌리기", None, Variant::Default, true) {
+        let undo_key = pc.interactive && ctx.input(|i| i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z));
+        let uw = if self.layout_undo.is_empty() { 0.0 } else { pc.btn_w("되돌리기", None) };
+        let hint = "상자를 끌어 모니터 가장자리에 붙이고, 모니터에서 멀리 끌어 놓으면 뗍니다.";
+        let hint_w = (w - uw - if uw > 0.0 { 16.0 } else { 0.0 }).max(120.0);
+        let hint_h = pc.wrap_h(hint, DESC, false, hint_w);
+        let row_h = hint_h.max(if uw > 0.0 { bh } else { 0.0 });
+        pc.wrap(x0, y + (row_h - hint_h) / 2.0, hint_w, hint, DESC, false, p.muted);
+        if uw > 0.0 {
+            let clicked = pc.button("undo", x0 + w - uw, y + (row_h - bh) / 2.0, uw, bh, "되돌리기", None, Variant::Default, true);
+            if clicked || undo_key {
                 if let Some(prev) = self.layout_undo.pop() {
                     self.apply(|c| c.attachments = prev);
                 }
             }
-            row = true;
         }
-        if row {
-            y += bh;
-        }
-        y += 18.0;
+        y += row_h + 22.0;
 
         // 가장자리 자동 전환(이 화면에만 둔다 — 배치와 함께 쓰는 설정).
         y = section(pc, y, "가장자리 자동 전환");
@@ -709,7 +744,7 @@ impl SettingsApp {
             w,
             Line::new(
                 "사용",
-                "붙여 둔 가장자리로 커서를 밀면 마우스·키보드가 모두 그 채널로 넘어갑니다. 끄면 단추나 트레이 메뉴로 직접 넘길 때만 넘어갑니다.",
+                "붙여 둔 가장자리로 커서를 밀면 마우스·키보드가 모두 그 채널로 넘어갑니다. 끄면 버튼이나 트레이 메뉴로 직접 넘길 때만 넘어갑니다.",
             ),
             cfg.edge_switch_enabled,
         );
@@ -726,7 +761,7 @@ impl SettingsApp {
             y,
             w,
             Line::new(
-                "머무는 시간",
+                "넘어가기 전 대기",
                 "가장자리에서 이만큼 밀고 있어야 넘어갑니다. 짧으면 빨리 넘어가고, 길면 실수로 넘어가는 일이 줄어듭니다. 기본 0.33초.",
             ),
             &[(&dwell_lab, Some(Icon::ChevronDown), Variant::Default)],
@@ -764,7 +799,7 @@ impl SettingsApp {
             w,
             Line::new(
                 "끌기 중 전환 막기",
-                "마우스 단추를 누른 채 창이나 파일을 끌고 있을 때는 가장자리에 닿아도 넘어가지 않습니다.",
+                "마우스 버튼을 누른 채 창이나 파일을 끌고 있을 때는 가장자리에 닿아도 넘어가지 않습니다.",
             ),
             cfg.drag_guard,
         );
@@ -775,9 +810,8 @@ impl SettingsApp {
         pc.card_end(slot, x0, top, w, y - top);
         y += 26.0;
 
-        // 채널 이름.
-        pc.text(x0, y, "채널 이름", LAB, true, p.ink);
-        y += pc.line_h(LAB, true) + 2.0;
+        // 채널 이름(묶음 머리는 다른 묶음과 같은 모양 — 0.16.1 첫 사용 점검).
+        y = section(pc, y, "채널 이름");
         y += pc.wrap(
             x0,
             y,
@@ -831,11 +865,14 @@ impl SettingsApp {
         let lh = pc.line_h(LAB, true);
         let others = shown.len().saturating_sub(sw.len());
         let head = if self.detail && others > 0 {
-            format!("기기   {}개 · 전환 안 되는 장치 {}개", sw.len(), others)
+            format!("기기 {}개 · 전환 안 되는 기기 {}개", sw.len(), others)
         } else {
-            format!("기기   {}개", sw.len())
+            format!("기기 {}개", sw.len())
         };
-        let head_w = pc.text(x0, y + (bh - lh) / 2.0, &head, LAB, true, p.ink);
+        // 묶음 머리 모양은 다른 묶음(「가장자리 자동 전환」 등)과 같게 — 0.16.1 첫 사용 점검.
+        let sh = pc.line_h(8.0, true);
+        let head_w = pc.text(x0, y + (bh - sh) / 2.0, &head, 8.0, true, p.muted);
+        let _ = lh;
         // 「자세히 보기」 ↔ 「간단히 보기」 — 목록 표시만 바꾸므로 링크, 목록 머리 바로 옆.
         let link = if self.detail { "간단히 보기" } else { "자세히 보기" };
         let link_w = pc.btn_w(link, None);
@@ -893,7 +930,7 @@ impl SettingsApp {
                 }
                 ids.push(format!("제품\u{a0}{}", d.vid_pid));
                 if d.change_host_supported {
-                    ids.push(format!("전환\u{a0}기능\u{a0}0x{:02X}", d.change_host_index));
+                    ids.push(format!("전환\u{a0}기능\u{a0}위치\u{a0}{}", d.change_host_index));
                 }
                 sub.push_str(&format!("\n문제\u{a0}확인용\u{a0}번호: {}", ids.join(" · ")));
             }
@@ -1174,7 +1211,7 @@ impl SettingsApp {
         let top = y;
         let use_line = Line::new(
             "사용",
-            "같은 네트워크에 있는 상대 PC 한 대와 복사한 글·이미지를 주고받습니다. 두 PC 모두 LogiFlow 를 켜 두고 같은 암호문구를 넣어야 합니다.",
+            "같은 네트워크에 있는 상대 PC 한 대와 복사한 글·이미지를 주고받습니다. 두 PC 모두 LogiFlow 를 켜 두어야 합니다.",
         );
         // 상태 한 줄 — 실제로 막히는 이유를 먼저(주소 → 암호문구 → 시작 실패 → 방화벽).
         let fw_now = *self.firewall_on.lock().unwrap();
@@ -1198,6 +1235,7 @@ impl SettingsApp {
         y += h;
         if cfg.clip_enabled {
             // 상대 PC 주소 · 암호문구 — 값이 있으면 「바꾸기」 + ⋮(지우기).
+            let secret_note = self.shared.lock().unwrap().secret_note.clone();
             for (key, lab, desc, value, prompt_label, is_secret) in [
                 (
                     "peer",
@@ -1219,7 +1257,9 @@ impl SettingsApp {
                 divider(pc, cx, y, w);
                 let empty = value.is_empty();
                 let line = Line::new(lab, desc);
+                let note = if is_secret { secret_note.clone() } else { None };
                 let line = match (empty, is_secret) {
+                    _ if note.is_some() => line.status(note.unwrap_or_default(), p.warn),
                     (true, _) => line.value("아직 없음", p.warn),
                     (false, true) => line.value("입력함", p.ink),
                     (false, false) => line.value(value.clone(), p.ink),
@@ -1801,10 +1841,7 @@ impl SettingsApp {
             x0,
             y,
             w,
-            Line::new(
-                "진단 기록 남기기",
-                "가장자리 감지와 전환 기록을 파일로 남깁니다. 잘 안 될 때 이 기록으로 원인을 찾습니다.",
-            ),
+            Line::new("진단 기록 남기기", "가장자리 감지와 전환 기록을 파일로 남깁니다."),
             cfg.diag_log_enabled,
         );
         if hit {
@@ -2031,6 +2068,14 @@ impl SettingsApp {
             s.config.theme = if dark { ThemeMode::Dark } else { ThemeMode::Light };
             s.config.font_offset = off;
             s.config.clip_enabled = variant != 1;
+            // 기기를 못 찾은 모양(0.16.1 빈 화면 안내) — 이 단계만 기기 목록을 비웠다가 다음 단계에서 되돌린다.
+            if variant == 5 {
+                if sn.stash.is_empty() {
+                    sn.stash = std::mem::take(&mut s.devices);
+                }
+            } else if !sn.stash.is_empty() {
+                s.devices = std::mem::take(&mut sn.stash);
+            }
             drop(s);
             // 공유를 끈 화면은 「허용 규칙이 남아 있는」 모양으로 찍는다(방화벽 줄이 접히지 않는지 보려고).
             if variant == 1 {
@@ -2068,7 +2113,7 @@ impl SettingsApp {
                 if dark { "dark" } else { "light" },
                 off,
                 if bottom { "-bottom" } else { "" },
-                ["", "-clipoff", "-detail", "-mid", "-legacy"][variant as usize]
+                ["", "-clipoff", "-detail", "-mid", "-legacy", "-nodevices"][variant as usize]
             );
             let path = sn.dir.join(name);
             let _ = std::fs::create_dir_all(&sn.dir);

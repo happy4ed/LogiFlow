@@ -8,6 +8,7 @@ pub mod ffi;
 pub mod glow_mac;
 pub mod hid;
 pub mod ipc;
+pub mod keychain;
 pub mod mainq;
 pub mod monitors;
 pub mod notify;

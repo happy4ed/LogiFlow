@@ -308,7 +308,7 @@ impl Canvas {
             let gs = r.width().min(r.height()) * 0.34;
             draw_icon(
                 &p,
-                Icon::Monitor,
+                box_icon(&label(self.boxes[i].channel)),
                 Rect::from_center_size(r.center(), Vec2::splat(gs)),
                 c(if auto { pal.accent } else { pal.muted }),
             );
@@ -395,5 +395,18 @@ impl Canvas {
             }
         }
         None
+    }
+}
+
+/// 채널 상자 아이콘 — 이름이 노트북이면 노트북 모양, 아니면 모니터(0.16.1 첫 사용 점검: 「노트북」 상자가 데스크톱 모양).
+fn box_icon(name: &str) -> Icon {
+    let n = name.to_lowercase();
+    if ["노트북", "랩탑", "맥북", "laptop", "notebook", "macbook", "그램", "thinkpad", "surface"]
+        .iter()
+        .any(|k| n.contains(k))
+    {
+        Icon::Laptop
+    } else {
+        Icon::Monitor
     }
 }

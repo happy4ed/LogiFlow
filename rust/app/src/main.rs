@@ -93,6 +93,8 @@ fn main() {
     };
     match name.as_str() {
         "--version" | "-v" => println!("LogiFlow {}", version),
+        // CI: 키체인 쓰기·읽기·지우기(시험 항목만).
+        "--keychain-selftest" => std::process::exit(logiflow_mac::keychain::selftest()),
         "--ui" => logiflow_ui::run(version),
         "--ui-snapshot" => logiflow_ui::run_snapshot(version, value.as_deref().unwrap_or("snapshots")),
         // 로그인 항목(LaunchAgent)으로 뜰 때 — 창 없이 메뉴 막대만.

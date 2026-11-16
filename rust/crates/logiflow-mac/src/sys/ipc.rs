@@ -121,13 +121,16 @@ pub struct State {
     pub clip_running: bool,
     pub config_plain: String,
     pub devices: String,
+    /// 암호문구 보관 문제(키체인) — 비어 있으면 문제 없음. Mac 만(Windows 상태 글에는 없는 줄).
+    pub secret_note: String,
 }
 
 pub fn encode_state(s: &State) -> String {
     format!(
-        "scanning={}\nclipRunning={}\n[config]\n{}\n[devices]\n{}",
+        "scanning={}\nclipRunning={}\nsecretNote={}\n[config]\n{}\n[devices]\n{}",
         if s.scanning { 1 } else { 0 },
         if s.clip_running { 1 } else { 0 },
+        s.secret_note.replace('\n', " "),
         s.config_plain,
         s.devices
     )
@@ -139,6 +142,7 @@ pub fn decode_state(t: &str) -> State {
         clip_running: false,
         config_plain: String::new(),
         devices: String::new(),
+        secret_note: String::new(),
     };
     let mut section = 0;
     for line in t.split('\n') {
@@ -152,6 +156,8 @@ pub fn decode_state(t: &str) -> State {
                         st.scanning = v == "1";
                     } else if let Some(v) = l.strip_prefix("clipRunning=") {
                         st.clip_running = v == "1";
+                    } else if let Some(v) = l.strip_prefix("secretNote=") {
+                        st.secret_note = v.to_string();
                     }
                 }
                 1 => {

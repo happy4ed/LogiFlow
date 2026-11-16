@@ -67,19 +67,21 @@ jobs:
           mkdir -p out
           for ARCH in x64 arm64; do
             T=$([ "$ARCH" = x64 ] && echo x86_64 || echo aarch64)-unknown-linux-musl
-            NAME="LogiFlowRs-v${VERSION}-linux-${ARCH}"
+            NAME="LogiFlow-v${VERSION}-linux-${ARCH}"
             mkdir -p "stage/$NAME"
             cp "rust/target/$T/release/logiflow-rs" "stage/$NAME/"
             cp rust/packaging/linux/* "stage/$NAME/"
             chmod +x "stage/$NAME/logiflow-rs" "stage/$NAME/"*.sh
             tar -C stage -czf "out/$NAME.tar.gz" "$NAME"
             tar -tzf "out/$NAME.tar.gz"
+            # 고정 이름 사본(README 의 releases/latest/download 링크용).
+            cp "out/$NAME.tar.gz" "out/LogiFlow-linux-${ARCH}.tar.gz"
           done
-          (cd out && sha256sum *.tar.gz > "LogiFlowRs-v${VERSION}-linux-SHA256SUMS.txt" && cat *.txt)
+          (cd out && sha256sum *.tar.gz > "LogiFlow-v${VERSION}-linux-SHA256SUMS.txt" && cat *.txt)
           ls -la out
       - uses: actions/upload-artifact@v4
         with:
-          name: LogiFlowRs-linux-${{ steps.version.outputs.version }}
+          name: LogiFlow-linux-${{ steps.version.outputs.version }}
           path: out/*
           if-no-files-found: error
           compression-level: 0
@@ -129,7 +131,14 @@ jobs:
           path: mac-out/out/*
           if-no-files-found: error
           compression-level: 0
+      - name: Keychain (write · read · delete a test item)
+        id: keychain
+        continue-on-error: true
+        run: |
+          "$PWD/mac-out/app-under-test/LogiFlowRs.app/Contents/MacOS/LogiFlowRs" --keychain-selftest
       - name: Smoke — menu bar agent · Swift settings import · IPC · login item · second launch opens settings
+        env:
+          KEYCHAIN_OK: ${{ steps.keychain.outcome == 'success' && '1' || '0' }}
         run: rust/ci/mac-smoke.sh "$PWD/mac-out/app-under-test/LogiFlowRs.app" "$PWD/mac-shots"
       - name: Settings window snapshots (same screens as Windows)
         continue-on-error: true
