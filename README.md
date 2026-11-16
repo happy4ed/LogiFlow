@@ -11,9 +11,20 @@
 
 판별 기록은 [Releases](https://github.com/happy4ed/LogiFlow/releases) — 맨 위 Latest 한 판에 세 OS 파일이 같이 있다.
 
-로지텍 Easy-Switch 엣지 전환 프로젝트. 현재 판 0.15.0 — Windows(변 밀기 전환·glow·로그온 화면
-서비스) · Mac(전환·변 밀기·glow 첫 판, `mac/`) · Linux(터미널 CLI, `linux/`).
-아래 1~2절은 초기(0.2.0) 진단 판 설명이 남아 있다.
+로지텍 Easy-Switch 엣지 전환 프로젝트. 현재 판 0.16.0 — Windows 는 새로 만든 앱(Rust, `rust/`)이
+기본이다(가장자리로 밀어 채널 전환 · glow · 로그인 화면 서비스 · 클립보드 공유, 더 가볍고 빠름).
+Mac(`mac/`) · Linux(터미널 CLI, `linux/`)는 0.15.0 그대로다.
+
+### Windows: 이전 판(0.15.x)에서 바꾸기
+
+1. [LogiFlow-windows-setup.exe](https://github.com/happy4ed/LogiFlow/releases/latest/download/LogiFlow-windows-setup.exe) 를 실행한다.
+   이전 판이 깔려 있으면 설치 파일이 이전 판을 조용히 지우고 새 판을 깐다(관리자 승인 없음).
+2. 처음 실행하면 이전 판 설정(별칭 · 배치 · 테마 · 클립보드 · 로그인 자동 시작 등)을 그대로 이어받는다.
+   이전 판에서 「로그온 전에도 실행」을 썼다면 한 번 켤지 묻는다(관리자 승인 한 번).
+3. 이전 판이 남긴 서비스·파일은 앱의 「기존 LogiFlow 정리」(전환 관리 · 진단 화면)로 지울 수 있다.
+4. 클립보드는 이전 판이 깔린 PC 와도 그대로 주고받는다.
+
+아래 1~2절은 초기(0.2.0) 진단 판 설명이 남아 있다(이전 C# 판 기준).
 
 쓰기는 0x1814 func1 setHost 하나뿐이며 (a)0x1814 지원 기기 (b)채널 0~(hostCount-1) 범위
 (c)전환 버튼 클릭 — 이 3조건에서만 전송한다. 그 외 쓰기는 하지 않는다.
