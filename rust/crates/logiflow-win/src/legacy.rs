@@ -34,7 +34,8 @@ pub fn conflict() -> bool {
     csharp_tray_running() || csharp_service_exists()
 }
 
-/// 첫 실행이면 C# 판 config.txt·devices.txt 를 옮겨 온다. 시험판 한정: preLogon=0 · autostart=0.
+/// 첫 실행이면 C# 판 config.txt·devices.txt 를 옮겨 온다(0.16.0: 값 그대로 — 자동 시작 포함).
+/// 「로그온 전에도 실행」만은 관리자 승인이 필요해 조용히 켤 수 없으므로 꺼 두고, 첫 실행 때 한 번 켤지 묻는다.
 /// 암호문구는 DPAPI 로 옮겨 담고, C# 원본 평문 파일은 건드리지 않는다.
 pub fn import_if_first_run(log: &DiagLogger) -> bool {
     let ours = paths::config_path();
@@ -46,19 +47,24 @@ pub fn import_if_first_run(log: &DiagLogger) -> bool {
         return false;
     }
     let mut cfg = AppConfig::load(&theirs, None);
+    let had_prelogon = cfg.pre_logon;
     cfg.pre_logon = false;
-    cfg.auto_start = false;
     let saved = dpapi::with_codec(|c| cfg.save(&ours, Some(c))).is_ok();
+    if saved && had_prelogon {
+        let _ = std::fs::write(paths::offer_prelogon_flag(), "1");
+    }
     let dev_src = paths::legacy_user_dir().join("devices.txt");
     let dev_dst = paths::devices_path();
     if dev_src.exists() && !dev_dst.exists() {
         let _ = std::fs::copy(&dev_src, &dev_dst);
     }
     log.log(&format!(
-        "C# 판 설정 이어받기: {} → {} ({}) · preLogon=0 · autostart=0",
+        "C# 판 설정 이어받기: {} → {} ({}) · autostart={} · preLogon={}(켤지 첫 실행 때 묻기)",
         theirs.display(),
         ours.display(),
-        if saved { "성공" } else { "실패" }
+        if saved { "성공" } else { "실패" },
+        if cfg.auto_start { 1 } else { 0 },
+        if had_prelogon { 1 } else { 0 }
     ));
     saved
 }

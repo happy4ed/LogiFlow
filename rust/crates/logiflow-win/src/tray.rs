@@ -79,13 +79,8 @@ pub fn run() {
     log.log("LogiFlow 시작(트레이)");
     legacy::import_if_first_run(&log);
     if !paths::config_path().exists() {
-        // 시험판 한정: 처음 설치(C# 판 설정 없음)도 로그인 자동 시작은 꺼 둔다(C# 판과 두 트레이 동시 자동 시작 방지).
-        let first = AppConfig {
-            auto_start: false,
-            ..Default::default()
-        };
-        save_config(&first);
-        log.log("첫 실행: 기본 설정 저장(시험판 — 자동 시작 꺼짐)");
+        save_config(&AppConfig::default());
+        log.log("첫 실행: 기본 설정 저장(로그인 자동 시작 켜짐)");
     }
     let config = load_config();
     log.set_enabled(config.diag_log_enabled);
@@ -154,6 +149,7 @@ pub fn run() {
     }
     reconfigure_watcher();
     update_tray(None);
+    offer_prelogon_once();
 
     // 캐시가 비었으면 첫 스캔, 아니면 캐시 표시 유지.
     wnd::post(|| {
@@ -170,6 +166,47 @@ pub fn run() {
 
     wnd::run_message_loop();
     log.log("LogiFlow 종료");
+}
+
+/// 이전 판에서 「로그온 전에도 실행」을 쓰던 사람에게 첫 실행 때 한 번 — 켜면 같은 관리자 승인으로 이전 판
+/// 서비스·남은 파일을 정리하고 이 앱의 서비스를 설치한다(설정 창 「로그인 전에도 실행」과 같은 경로).
+fn offer_prelogon_once() {
+    let flag = paths::offer_prelogon_flag();
+    if !flag.exists() {
+        return;
+    }
+    let _ = std::fs::remove_file(&flag);
+    let Some((cfg, log)) = with(|t| (t.config.clone(), t.log.clone())) else {
+        return;
+    };
+    std::thread::spawn(move || {
+        let pick = crate::util::task_dialog(
+            None,
+            "LogiFlow",
+            "이전 판에서 쓰던 「로그인 전에도 실행」을 켤까요?",
+            "켜면 PC 를 켠 직후의 로그인 화면과 잠금 화면에서도 가장자리로 밀면 넘어갑니다. 이전 판의 서비스·남은 파일을 정리하고 이 앱의 서비스를 설치합니다(관리자 승인 한 번). 나중에 설정 창에서 켤 수도 있습니다.",
+            &[(1001, "켜기")],
+        );
+        if pick != 1001 {
+            log.log("이전 판 로그인 전 실행 이어받기: 나중에");
+            return;
+        }
+        legacy::cleanup_user(&log);
+        write_logon_edges(&cfg);
+        let ok = crate::prelogon::request_enable(cfg.my_host);
+        log.log(&format!("이전 판 로그인 전 실행 이어받기: {}", if ok { "켬" } else { "취소·실패" }));
+        if ok {
+            wnd::post(|| {
+                let c = with(|t| {
+                    t.config.pre_logon = true;
+                    t.config.clone()
+                });
+                if let Some(c) = c {
+                    apply_config(c);
+                }
+            });
+        }
+    });
 }
 
 fn apply_autostart(on: bool) {

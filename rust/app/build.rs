@@ -45,7 +45,7 @@ BEGIN
     BLOCK "041204B0"
     BEGIN
       VALUE "CompanyName", "happy4ed"
-      VALUE "FileDescription", "LogiFlow (러스트 시험판)"
+      VALUE "FileDescription", "LogiFlow"
       VALUE "FileVersion", "{ver}"
       VALUE "InternalName", "LogiFlowRs"
       VALUE "LegalCopyright", "Copyright (c) 2026 happy4ed · MIT"

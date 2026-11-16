@@ -1,4 +1,5 @@
-//! 이름·경로. 러스트 시험판은 모든 이름을 C# 판과 다르게 해 나란히 설치된다(계획서 6절 3).
+//! 이름·경로. 내부 이름(LogiFlowRs…)은 시험판 때 C# 판과 겹치지 않게 정한 것을 0.16.0 기본 판에서도 그대로 쓴다
+//! — 이미 깔린 rs 판이 그 자리에서 업그레이드되게(옮겨 담기 없음). 사용자에게 보이는 이름만 「LogiFlow」.
 
 use std::path::PathBuf;
 
@@ -8,7 +9,7 @@ pub const EXE_NAME: &str = "LogiFlowRs.exe";
 /// 트레이 단일 인스턴스 뮤텍스.
 pub const MUTEX_NAME: &str = "LogiFlowRs-6F3B2D1A-9C84-4E57-B0A3-7D52E1C9F046";
 pub const SERVICE_NAME: &str = "LogiFlowRsLogonSwitch";
-pub const SERVICE_DISPLAY: &str = "LogiFlow 로그온 전환 (러스트 시험판)";
+pub const SERVICE_DISPLAY: &str = "LogiFlow 로그인 전 전환";
 pub const TRAY_TASK: &str = "LogiFlowRs-Tray";
 pub const PROBE_TASK: &str = "LogiFlowRs-DesktopProbe";
 pub const OLD_PRELOGON_TASK: &str = "LogiFlowRs-PreLogon";
@@ -67,6 +68,10 @@ pub fn lock_flag_path() -> PathBuf {
 }
 pub fn probe_log_path() -> PathBuf {
     machine_dir().join("desktop-probe.log")
+}
+/// 이전 판에서 「로그온 전에도 실행」을 쓰고 있었다는 표시 — 첫 실행 때 한 번 켤지 묻는다.
+pub fn offer_prelogon_flag() -> PathBuf {
+    user_dir().join("offer-prelogon.flag")
 }
 pub fn worker_dir() -> PathBuf {
     machine_dir().join("worker")

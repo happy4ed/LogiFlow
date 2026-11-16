@@ -121,14 +121,21 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
-          & $iscc "/DAppVersion=$env:VERSION" "/DFileVersion=$env:FILE_VERSION" "/DDistDir=..\dist" "/DOutputDir=..\dist" "rust/installer/LogiFlowRs.iss"
+          & $iscc "/DAppVersion=$env:VERSION" "/DFileVersion=$env:FILE_VERSION" "/DDistDir=..\dist" "/DOutputDir=..\out" "rust/installer/LogiFlowRs.iss"
           if ($LASTEXITCODE -ne 0) { throw 'Installer compile failed' }
-          $zip = "rust/dist/LogiFlowRs-v$env:VERSION-win-x64-arm64.zip"
+          # 배포 이름(0.16.0~ Windows 기본 판): C# 판 릴리스와 같은 꼴 — LogiFlow-v<판>-setup.exe · -win.zip · -SHA256SUMS.txt,
+          # 정식 판(접미사 없음)은 고정 이름 LogiFlow-windows-setup.exe 사본도(README 의 releases/latest/download 링크).
+          $zip = "rust/out/LogiFlow-v$env:VERSION-win.zip"
           Compress-Archive -Path rust/dist/x64, rust/dist/arm64 -DestinationPath $zip -Force
-          $names = @("LogiFlowRs-v$env:VERSION-setup.exe", "LogiFlowRs-v$env:VERSION-win-x64-arm64.zip")
-          $lines = foreach ($n in $names) { $h = (Get-FileHash "rust/dist/$n" -Algorithm SHA256).Hash.ToLowerInvariant(); "$h  $n" }
-          $lines | Set-Content "rust/dist/LogiFlowRs-v$env:VERSION-SHA256SUMS.txt" -Encoding utf8
-          Get-Content "rust/dist/LogiFlowRs-v$env:VERSION-SHA256SUMS.txt"
+          $names = @("LogiFlow-v$env:VERSION-setup.exe", "LogiFlow-v$env:VERSION-win.zip")
+          if ($env:VERSION -notmatch '-') {
+            Copy-Item "rust/out/LogiFlow-v$env:VERSION-setup.exe" rust/out/LogiFlow-windows-setup.exe
+            $names += 'LogiFlow-windows-setup.exe'
+          }
+          $lines = foreach ($n in $names) { $h = (Get-FileHash "rust/out/$n" -Algorithm SHA256).Hash.ToLowerInvariant(); "$h  $n" }
+          $lines | Set-Content "rust/out/LogiFlow-v$env:VERSION-SHA256SUMS.txt" -Encoding utf8
+          Get-Content "rust/out/LogiFlow-v$env:VERSION-SHA256SUMS.txt"
+          Get-ChildItem rust/out | ForEach-Object { "{0,-44} {1,12:N0} bytes" -f $_.Name, $_.Length }
           # zip 안에 로그가 섞이면 실패(실행 파일 2개만 있어야 함).
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $z = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
@@ -140,19 +147,24 @@ jobs:
           $exes = $names | Where-Object { $_ -match 'LogiFlowRs\.exe$' }
           if ($exes.Count -ne 2) { throw "zip should hold exactly 2 executables, got $($exes.Count)" }
 
+      # 설치·업그레이드·제거 경로(이전 C# 판 → 이 판, 제자리 업그레이드, 제거 정리).
+      - name: Install / upgrade / uninstall paths
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./rust/ci/install-test.ps1 -Setup "$pwd/rust/out/LogiFlow-v$env:VERSION-setup.exe" -Version $env:VERSION
+
       - uses: actions/upload-artifact@v4
         with:
-          name: LogiFlowRs-Windows-${{ steps.version.outputs.version }}
-          path: |
-            rust/dist/LogiFlowRs-v*-setup.exe
-            rust/dist/LogiFlowRs-v*-win-x64-arm64.zip
-            rust/dist/LogiFlowRs-v*-SHA256SUMS.txt
+          name: LogiFlow-Windows-${{ steps.version.outputs.version }}
+          path: rust/out/*
           if-no-files-found: error
           compression-level: 0
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LogiFlowRs-snapshots-${{ steps.version.outputs.version }}
+          name: LogiFlow-snapshots-${{ steps.version.outputs.version }}
           path: rust/snapshots/*.png
           if-no-files-found: warn
