@@ -1,0 +1,10 @@
+# LogiFlow(러스트 판) — 로지텍 HID++ 장치(hidraw)를 sudo 없이 쓰게 한다. 지금 판 42-logiflow.rules 와 같은 내용.
+# 로그인한 사용자(uaccess) + plugdev 그룹(SSH 터미널용).
+ACTION!="add|change", GOTO="logiflow_rs_end"
+SUBSYSTEM!="hidraw", GOTO="logiflow_rs_end"
+ATTRS{idVendor}=="046d", GOTO="logiflow_rs_apply"
+KERNELS=="0005:046D:*", GOTO="logiflow_rs_apply"
+GOTO="logiflow_rs_end"
+LABEL="logiflow_rs_apply"
+MODE="0660", GROUP="plugdev", TAG+="uaccess"
+LABEL="logiflow_rs_end"

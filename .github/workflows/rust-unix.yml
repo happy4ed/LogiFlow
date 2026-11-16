@@ -1,0 +1,85 @@
+name: Rust port — Linux · Mac build (rust-port)
+
+# 2단계(계획서 13절): 리눅스 CLI(logiflow-rs) · Mac 앱. rust-port 브랜치에서만, 릴리스는 내지 않는다(main 이 초안에 올림).
+on:
+  push:
+    branches: [rust-port]
+    paths:
+      - 'rust/**'
+      - '.github/workflows/rust-unix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-unix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Cross linker for arm64
+        run: sudo apt-get update -q && sudo apt-get install -y -q musl-tools gcc-aarch64-linux-gnu
+      - name: Resolve version
+        id: version
+        run: |
+          V=$(grep -m1 '^version = ' rust/Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: Format, lint, tests
+        working-directory: rust
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy -p logiflow-core -p logiflow-linux --all-targets -- -D warnings
+          cargo test -p logiflow-core -p logiflow-linux
+      - name: Build x64 + arm64 (static musl — runs on any distro)
+        working-directory: rust
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          cargo build --release -p logiflow-linux --target x86_64-unknown-linux-musl
+          cargo build --release -p logiflow-linux --target aarch64-unknown-linux-musl
+          file target/x86_64-unknown-linux-musl/release/logiflow-rs target/aarch64-unknown-linux-musl/release/logiflow-rs
+      - name: CLI smoke (no devices on runner)
+        run: |
+          B=rust/target/x86_64-unknown-linux-musl/release/logiflow-rs
+          $B --version
+          $B selftest
+          $B --help
+          # 장치 없는 러너: 안내 후 종료코드 1 이 정상(C# 판과 같음).
+          set +e; $B list; c=$?; $B 2; d=$?; set -e
+          echo "list exit=$c · switch exit=$d"; test "$c" = 1; test "$d" = 1
+      - name: Package tar.gz
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          for ARCH in x64 arm64; do
+            T=$([ "$ARCH" = x64 ] && echo x86_64 || echo aarch64)-unknown-linux-musl
+            NAME="LogiFlowRs-v${VERSION}-linux-${ARCH}"
+            mkdir -p "stage/$NAME"
+            cp "rust/target/$T/release/logiflow-rs" "stage/$NAME/"
+            cp rust/packaging/linux/* "stage/$NAME/"
+            chmod +x "stage/$NAME/logiflow-rs" "stage/$NAME/"*.sh
+            tar -C stage -czf "out/$NAME.tar.gz" "$NAME"
+            tar -tzf "out/$NAME.tar.gz"
+          done
+          (cd out && sha256sum *.tar.gz > "LogiFlowRs-v${VERSION}-linux-SHA256SUMS.txt" && cat *.txt)
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LogiFlowRs-linux-${{ steps.version.outputs.version }}
+          path: out/*
+          if-no-files-found: error
+          compression-level: 0

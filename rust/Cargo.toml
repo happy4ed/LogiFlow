@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/logiflow-core", "crates/logiflow-win", "crates/logiflow-ui", "app"]
+members = ["crates/logiflow-core", "crates/logiflow-win", "crates/logiflow-ui", "crates/logiflow-linux", "app"]
 
 [workspace.package]
 version = "0.16.0"
