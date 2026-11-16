@@ -311,6 +311,9 @@ fn connection_text(raw: &str) -> (String, Option<String>) {
     }
     (raw.to_string(), None)
 }
+/// 「이전 판 지우기」가 하는 일 — 전환 관리 알림 · 진단 카드 · 확인 상자에 같은 글(첫 사용 점검 0.16.2: 두 곳 설명이 달랐다).
+const LEGACY_WHAT: &str = "이전 판 앱·로그인 전 실행 서비스·예약 작업·자동 시작 항목·남은 파일을 지웁니다. 지금 쓰는 LogiFlow 와 설정은 그대로 남습니다. 관리자 승인이 한 번 필요합니다.";
+
 /// 확인 상자 끝줄 — 이 PC 로 되돌아오는 길(전환하면 이 PC 에서 마우스·키보드를 잃으므로).
 fn come_back(this_channel: i32) -> String {
     if this_channel >= 0 {
@@ -643,7 +646,11 @@ impl SettingsApp {
                 w,
                 Line::new(
                     "가장자리 자동 전환이 멈춰 있습니다",
-                    format!("이전 판이 남아 있어 두 앱이 함께 넘기지 않도록 멈춰 두었습니다. 남은 것: {}.", l.describe()),
+                    format!(
+                        "이전 판이 남아 있어 두 앱이 함께 넘기지 않도록 멈춰 두었습니다. 남은 것: {}. {}",
+                        l.describe(),
+                        LEGACY_WHAT
+                    ),
                 )
                 .status("지우면 바로 다시 켜집니다", p.warn),
                 &[("이전 판 지우기", None, Variant::Default)],
@@ -657,10 +664,31 @@ impl SettingsApp {
         }
 
         // 캔버스(이 PC 모니터 + 다른 채널 상자).
-        let canvas_h = 300.0;
         let max_host = max_host_count(devices);
         let current = current_channel(devices);
         let channels: Vec<i32> = (0..max_host).filter(|h| *h != current).collect();
+        // 기기를 못 찾아 채널 상자가 없을 때 — 캔버스 안에 이유와 할 일(0.16.1 첫 사용 점검: 모니터만 보여 막힘).
+        // 「다시 찾기」는 이 안내 바로 옆에 두고, 이때는 아래 「기기」 묶음의 「다시 찾기」를 숨긴다(진입점은 늘 하나 —
+        // 0.16.2 첫 사용 점검: 안내가 스크롤 맨 아래 단추를 가리켰다).
+        let bh = pc.btn_h();
+        let rescan = if scanning { "찾는 중…" } else { "다시 찾기" };
+        let rw = pc.btn_w(rescan, Some(Icon::Refresh));
+        let empty_msg = if scanning {
+            "기기를 찾는 중입니다…"
+        } else {
+            "로지텍 마우스·키보드를 찾지 못해 붙일 채널 상자가 없습니다. 기기를 켜거나 리시버를 꽂은 뒤 「다시 찾기」를 누르세요."
+        };
+        let ecw = (w - 64.0).min(472.0);
+        let emw = ecw - 32.0 - rw - 16.0;
+        let emh = pc.wrap_h(empty_msg, DESC, false, emw);
+        let ech = emh.max(bh) + 24.0;
+        // 안내 상자가 가운데 모니터와 겹치지 않게 캔버스를 늘린다(모니터 = 캔버스 높이의 약 1/4, 가운데 —
+        // 안내 위 = 캔버스 높이 − 상자 − 16 ≥ 모니터 아래 + 8 이 되는 높이, 「크게」에서 안내가 길어질 때).
+        let canvas_h: f32 = if channels.is_empty() {
+            300f32.max(((ech + 24.0) * 8.0 / 3.0).ceil())
+        } else {
+            300.0
+        };
         let screens: Vec<Screen> = monitors::all()
             .into_iter()
             .map(|m| Screen {
@@ -691,27 +719,29 @@ impl SettingsApp {
         ) {
             self.set_layout(cfg, att);
         }
-        // 기기를 못 찾아 채널 상자가 없을 때 — 캔버스 안에 이유와 할 일(0.16.1 첫 사용 점검: 모니터만 보여 막힘).
-        // 「다시 찾기」는 아래 「기기」 묶음 하나만 둔다(같은 일의 진입점 하나 — 2차 점검).
         if channels.is_empty() {
-            let msg = if scanning {
-                "기기를 찾는 중입니다…"
-            } else {
-                "로지텍 마우스·키보드를 찾지 못해 붙일 채널 상자가 없습니다. 기기를 켜거나 리시버를 꽂은 뒤 아래 「기기」의 「다시 찾기」를 누르세요."
-            };
-            let mw = (w - 64.0).min(440.0);
-            let mh = pc.wrap_h(msg, DESC, false, mw);
-            let (cw_, ch_) = (mw + 32.0, mh + 24.0);
-            let cx_ = x0 + (w - cw_) / 2.0;
-            let cy_ = y + canvas_h - ch_ - 20.0;
-            pc.card(cx_, cy_, cw_, ch_);
-            pc.wrap(cx_ + 16.0, cy_ + 12.0, mw, msg, DESC, false, p.muted);
+            let cx_ = x0 + (w - ecw) / 2.0;
+            let cy_ = y + canvas_h - ech - 16.0;
+            pc.card(cx_, cy_, ecw, ech);
+            pc.wrap(cx_ + 16.0, cy_ + (ech - emh) / 2.0, emw, empty_msg, DESC, false, p.muted);
+            if pc.button(
+                "rescan0",
+                cx_ + ecw - 16.0 - rw,
+                cy_ + (ech - bh) / 2.0,
+                rw,
+                bh,
+                rescan,
+                Some(Icon::Refresh),
+                Variant::Default,
+                !scanning,
+            ) {
+                self.rescan();
+            }
         }
         y += canvas_h + 8.0;
         // 캔버스 바로 아래 한 줄: 왼쪽 붙이기·떼기 방법(상단 설명에 묻혀 있던 것을 캔버스 옆으로 — 0.16.1 첫 사용 점검),
         // 오른쪽 「되돌리기」(배치를 바꾼 적이 있을 때 · Ctrl+Z / ⌘Z 도 같음). rs.4: 「채널 모두 떼기」는 뺐다 — 결과가
         // 「사용」 스위치를 끈 것과 같아(밀어도 안 넘어감) 잠깐 끄려던 사람이 배치를 지우게 됐다(8차 첫 사용 점검).
-        let bh = pc.btn_h();
         let undo_key = pc.interactive && ctx.input(|i| i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z));
         let uw = if self.layout_undo.is_empty() { 0.0 } else { pc.btn_w("되돌리기", None) };
         let hint = if channels.is_empty() {
@@ -868,8 +898,8 @@ impl SettingsApp {
         y = section(pc, y, "기기");
         let slot = pc.card_begin();
         let top = y;
-        let rescan = if scanning { "찾는 중…" } else { "다시 찾기" };
-        let rw = pc.btn_w(rescan, Some(Icon::Refresh));
+        // 채널 상자가 없으면 「다시 찾기」는 캔버스 안 안내 옆에만(위).
+        let rw = if channels.is_empty() { 0.0 } else { rw };
         // 개수는 전환되는 기기만(리시버 본체가 보여도 고장처럼 읽히지 않게).
         let found = if !sw.is_empty() {
             format!("찾은 기기 {}개", sw.len())
@@ -886,17 +916,19 @@ impl SettingsApp {
         };
         let head = Line::new("", desc).value(found, if sw.is_empty() && !scanning { p.warn } else { p.ink });
         let h = row_text(pc, x0, y, w, rw, &head);
-        if pc.button(
-            "rescan",
-            x0 + w - PX - rw,
-            y + (h - bh) / 2.0,
-            rw,
-            bh,
-            rescan,
-            Some(Icon::Refresh),
-            Variant::Default,
-            !scanning,
-        ) {
+        if rw > 0.0
+            && pc.button(
+                "rescan",
+                x0 + w - PX - rw,
+                y + (h - bh) / 2.0,
+                rw,
+                bh,
+                rescan,
+                Some(Icon::Refresh),
+                Variant::Default,
+                !scanning,
+            )
+        {
             self.rescan();
         }
         // 「문의용 번호 보기」 ↔ 「문의용 번호 숨기기」 — 목록 표시만 바꾸므로 링크(다른 링크와 같은 글자 크기), 설명 바로 아래.
@@ -1245,7 +1277,7 @@ impl SettingsApp {
                 (
                     "peer",
                     "상대 컴퓨터 주소",
-                    "상대 컴퓨터의 「이 컴퓨터 주소」를 넣습니다.",
+                    "상대 컴퓨터 설정 창에 보이는 「이 컴퓨터 주소」를 넣습니다.",
                     cfg.clip_peer_host.clone(),
                     "상대 컴퓨터의 「이 컴퓨터 주소」 (예: 192.168.0.20)",
                     false,
@@ -1318,79 +1350,9 @@ impl SettingsApp {
                     _ => {}
                 }
                 y += h;
-            }
-            // 이 컴퓨터 주소 — 첫 주소만 「복사」와 함께 늘 보이고, 다른 주소는 접어 두었다가 「다른 주소 보기」로 편다
-            // (보통 쓰지 않는 주소를 같은 무게의 「복사」로 늘 보이면 잘못 복사하기 쉽다 — 0.16.2).
-            let ips_state = self.local_ips.lock().unwrap().clone();
-            let ips = ips_state.clone().unwrap_or_default();
-            if ips.is_empty() {
-                divider(pc, cx, y, w);
-                let line = Line::new("이 컴퓨터 주소", "상대 컴퓨터의 「상대 컴퓨터 주소」에 이 값만 넣습니다(포트는 넣지 않음).");
-                let line = if ips_state.is_none() {
-                    line.value("찾는 중…", p.muted)
-                } else {
-                    line.value("찾지 못함 — 네트워크 연결을 확인하세요", p.warn)
-                };
-                y += row_text(pc, cx, y, w, 0.0, &line);
-            }
-            for (i, addr) in ips.iter().enumerate() {
-                if i > 0 && !self.other_ips {
-                    break;
-                }
-                divider(pc, cx, y, w);
-                let ip = &addr.ip;
-                // 어느 네트워크 주소인지 먼저 — 상대 컴퓨터와 같은 네트워크(같은 공유기)의 주소를 넣는다.
-                let net = if addr.network.is_empty() {
-                    String::new()
-                } else {
-                    format!("{} 주소입니다. ", addr.network)
-                };
-                let line = if i == 0 {
-                    Line::new(
-                        "이 컴퓨터 주소",
-                        format!("{}상대 컴퓨터의 「상대 컴퓨터 주소」에 이 값만 넣습니다(포트는 넣지 않음).", net),
-                    )
-                } else if addr.virtual_adapter {
-                    Line::new("다른 주소", format!("{}다른 컴퓨터와 연결할 때는 보통 쓰지 않습니다.", net))
-                } else {
-                    Line::new(
-                        "다른 주소",
-                        format!(
-                            "{}상대 컴퓨터가 이 네트워크에 있으면 그 컴퓨터의 「상대 컴퓨터 주소」에 이 주소를 넣으세요.",
-                            net
-                        ),
-                    )
-                };
-                let copied = matches!(self.copied, Some((k, t)) if k == i && t.elapsed().as_secs_f32() < 2.0);
-                if copied {
-                    ctx.request_repaint_after(std::time::Duration::from_millis(300));
-                }
-                // 첫 주소의 「복사」만 단추 모양, 다른 주소는 가벼운 링크 모양.
-                let variant = if i == 0 { Variant::Default } else { Variant::Ghost };
-                let (hit, h) = buttons_row(
-                    pc,
-                    &format!("copy{}", i),
-                    cx,
-                    y,
-                    w,
-                    line.value(ip.clone(), p.ink),
-                    &[(if copied { "복사함" } else { "복사" }, None, variant)],
-                );
-                if hit.is_some() {
-                    ctx.copy_text(ip.clone());
-                    self.copied = Some((i, Instant::now()));
-                }
-                if i == 0 && ips.len() > 1 {
-                    // 「다른 주소 보기」 ↔ 「다른 주소 숨기기」 — 표시만 바꾸므로 링크, 첫 주소 설명 바로 아래.
-                    y += h - ROW_V + 2.0;
-                    let link = if self.other_ips { "다른 주소 숨기기" } else { "다른 주소 보기" };
-                    let lw = pc.btn_w(link, None);
-                    if pc.button("otherips", cx + PX - 14.0, y, lw, bh, link, None, Variant::Ghost, true) {
-                        self.other_ips = !self.other_ips;
-                    }
-                    y += bh + ROW_V - 4.0;
-                } else {
-                    y += h;
+                // 「상대 컴퓨터 주소」 바로 아래 「이 컴퓨터 주소」 — 두 주소를 붙여 둔다(첫 사용 점검 0.16.2).
+                if key == "peer" {
+                    y = self.local_addr_rows(pc, ctx, cx, y, w);
                 }
             }
             // Windows 방화벽(Mac 에서는 숨김 — 들어오는 연결을 시스템이 처음 한 번 묻는다).
@@ -1467,8 +1429,9 @@ impl SettingsApp {
         let found = self.legacy.lock().unwrap().clone().unwrap_or_default();
         let what = if found.any() { found.describe() } else { "남은 흔적".to_string() };
         let content = format!(
-            "남은 것: {}.\r\n\r\n지우면 이전 판의 앱·로그인 전 실행 서비스·예약 작업·자동 시작 항목·남은 파일을 모두 지웁니다. 이전 판의 설정 파일(%APPDATA%\\LogiFlow)은 지우지 않습니다. 관리자 승인이 한 번 필요합니다.{}",
+            "남은 것: {}.\r\n\r\n{}{}",
             what,
+            LEGACY_WHAT,
             if then_enable_prelogon {
                 "\r\n지운 뒤 이 앱의 「로그인 전에도 실행」을 켭니다."
             } else {
@@ -1537,6 +1500,84 @@ impl SettingsApp {
             log.log(&format!("[기존 LogiFlow 정리] 결과: {}", lines.join(" / ")));
         });
         self.modal = Some(modal);
+    }
+
+    /// 「이 컴퓨터 주소」 줄(첫 주소 + 접어 둔 다른 주소). 다음 y.
+    fn local_addr_rows(&mut self, pc: &Pc<'_>, ctx: &egui::Context, cx: f32, mut y: f32, w: f32) -> f32 {
+        let p = pc.pal;
+        let bh = pc.btn_h();
+        // 이 컴퓨터 주소 — 첫 주소만 「복사」와 함께 늘 보이고, 다른 주소는 접어 두었다가 「다른 주소 보기」로 편다
+        // (보통 쓰지 않는 주소를 「복사」와 함께 늘 보이면 잘못 복사하기 쉽다 — 0.16.2).
+        let ips_state = self.local_ips.lock().unwrap().clone();
+        let ips = ips_state.clone().unwrap_or_default();
+        if ips.is_empty() {
+            divider(pc, cx, y, w);
+            let line = Line::new("이 컴퓨터 주소", "이 주소를 상대 컴퓨터의 「상대 컴퓨터 주소」에 넣으세요.");
+            let line = if ips_state.is_none() {
+                line.value("찾는 중…", p.muted)
+            } else {
+                line.value("찾지 못함 — 네트워크 연결을 확인하세요", p.warn)
+            };
+            y += row_text(pc, cx, y, w, 0.0, &line);
+        }
+        for (i, addr) in ips.iter().enumerate() {
+            if i > 0 && !self.other_ips {
+                break;
+            }
+            divider(pc, cx, y, w);
+            let ip = &addr.ip;
+            // 어느 네트워크 주소인지 먼저 — 상대 컴퓨터와 같은 네트워크(같은 공유기)의 주소를 넣는다.
+            let net = if addr.network.is_empty() {
+                String::new()
+            } else {
+                format!("{} 주소입니다. ", addr.network)
+            };
+            let line = if i == 0 {
+                Line::new("이 컴퓨터 주소", format!("{}이 주소를 상대 컴퓨터의 「상대 컴퓨터 주소」에 넣으세요.", net))
+            } else if addr.virtual_adapter {
+                Line::new("다른 주소", format!("{}다른 컴퓨터와 연결할 때는 보통 쓰지 않습니다.", net))
+            } else {
+                Line::new(
+                    "다른 주소",
+                    format!(
+                        "{}상대 컴퓨터가 이 네트워크에 있으면 그 컴퓨터의 「상대 컴퓨터 주소」에 이 주소를 넣으세요.",
+                        net
+                    ),
+                )
+            };
+            let copied = matches!(self.copied, Some((k, t)) if k == i && t.elapsed().as_secs_f32() < 2.0);
+            if copied {
+                ctx.request_repaint_after(std::time::Duration::from_millis(300));
+            }
+            // 같은 동작은 같은 모양 — 다른 주소의 「복사」도 단추(접어 두어 늘 보이지는 않음, 첫 사용 점검 0.16.2).
+            let variant = Variant::Default;
+            let (hit, h) = buttons_row(
+                pc,
+                &format!("copy{}", i),
+                cx,
+                y,
+                w,
+                line.value(ip.clone(), p.ink),
+                &[(if copied { "복사함" } else { "복사" }, None, variant)],
+            );
+            if hit.is_some() {
+                ctx.copy_text(ip.clone());
+                self.copied = Some((i, Instant::now()));
+            }
+            if i == 0 && ips.len() > 1 {
+                // 「다른 주소 보기」 ↔ 「다른 주소 숨기기」 — 표시만 바꾸므로 링크, 첫 주소 설명 바로 아래.
+                y += h - ROW_V + 2.0;
+                let link = if self.other_ips { "다른 주소 숨기기" } else { "다른 주소 보기" };
+                let lw = pc.btn_w(link, None);
+                if pc.button("otherips", cx + PX - 14.0, y, lw, bh, link, None, Variant::Ghost, true) {
+                    self.other_ips = !self.other_ips;
+                }
+                y += bh + ROW_V - 4.0;
+            } else {
+                y += h;
+            }
+        }
+        y
     }
 
     /// 「Windows 방화벽」 줄. sharing_off = 공유를 끈 상태(규칙이 남아 있을 때만 불림). 줄 높이.
@@ -1843,11 +1884,7 @@ impl SettingsApp {
                 x0,
                 y,
                 w,
-                Line::new(
-                    "남은 것",
-                    "지우면 앱·로그인 전 실행 서비스·예약 작업·자동 시작 항목·남은 파일을 모두 지웁니다. 설정 파일은 남깁니다. 관리자 승인이 한 번 필요할 수 있습니다.",
-                )
-                .status(l.describe(), p.warn),
+                Line::new("남은 것", LEGACY_WHAT).status(l.describe(), p.warn),
                 &[("이전 판 지우기", None, Variant::Default)],
             );
             if hit.is_some() {

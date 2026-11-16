@@ -88,6 +88,7 @@ mod snap {
         steps.push((0, false, 3, true, 2));
         steps.push((0, false, 1, false, 5)); // 기기를 못 찾았을 때(빈 화면 안내)
         steps.push((0, true, -1, false, 5));
+        steps.push((0, false, 3, false, 5)); // 기기를 못 찾았을 때 · 크게(안내 상자와 모니터가 겹치지 않는지)
         steps.push((0, false, 3, true, 5)); // 기기를 못 찾았을 때 아래(「기기」 묶음)
         steps.push((1, false, 1, false, 6)); // 설정 가운데 + 「다른 주소 보기」 펼침
         if with_legacy {
