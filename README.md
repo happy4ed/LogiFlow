@@ -11,9 +11,17 @@
 
 판별 기록은 [Releases](https://github.com/happy4ed/LogiFlow/releases) — 맨 위 Latest 한 판에 세 OS 파일이 같이 있다.
 
-로지텍 Easy-Switch 엣지 전환 프로젝트. 현재 판 0.16.0 — Windows 는 새로 만든 앱(Rust, `rust/`)이
-기본이다(가장자리로 밀어 채널 전환 · glow · 로그인 화면 서비스 · 클립보드 공유, 더 가볍고 빠름).
-Mac(`mac/`) · Linux(터미널 CLI, `linux/`)는 0.15.0 그대로다.
+로지텍 Easy-Switch 엣지 전환 프로젝트. 현재 판 0.16.1 — Windows · Mac · Linux 모두 새로 만든 앱(Rust, `rust/`)이
+기본이다(가장자리로 밀어 채널 전환 · glow · 클립보드 공유, 더 가볍고 빠름). Linux 는 터미널 CLI 다.
+이전 Mac 판(Swift, `mac/`) · Linux 판(`linux/`)은 0.15.0 에서 멈췄다.
+
+### Mac: 처음 열 때
+
+서명하지 않은 앱이라 처음 한 번은 macOS 가 막는다.
+
+- macOS 14 이하: Finder 에서 앱을 Control-클릭 → 「열기」.
+- macOS 15 이상: 시스템 설정 → 개인정보 보호 및 보안 → 「그래도 열기」.
+- 클립보드 암호 문구는 Mac 키체인에 저장한다. 처음 읽을 때 「항상 허용」을 물을 수 있다.
 
 ### Windows: 이전 판(0.15.x)에서 바꾸기
 
