@@ -181,6 +181,10 @@ mod win {
         for off in [-1, 1, 3] {
             steps.push((1, false, off, false, 3)); // 설정 가운데(클립보드 공유 위쪽)
         }
+        // 기존 LogiFlow(이전 판)가 남은 모양 — 전환 관리 카드 안 알림 · 진단 카드.
+        steps.push((0, false, 1, false, 4));
+        steps.push((0, false, 3, false, 4));
+        steps.push((2, false, 1, false, 4));
         steps.push((0, false, 1, true, 2)); // 기기 자세히 보기
         steps.push((0, false, 3, true, 2));
         let viewport = egui::ViewportBuilder::default().with_title("LogiFlow").with_inner_size([820.0, 660.0]);

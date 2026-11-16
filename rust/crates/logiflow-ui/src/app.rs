@@ -2016,6 +2016,16 @@ impl SettingsApp {
             } else if variant == 0 {
                 *self.firewall_on.lock().unwrap() = Some(false);
             }
+            // 이전 판(C#)이 남은 모양 — 정리 단추·안내가 보이는지.
+            *self.legacy.lock().unwrap() = Some(if variant == 4 {
+                legacy::Leftovers {
+                    service: true,
+                    machine_dir: true,
+                    ..Default::default()
+                }
+            } else {
+                legacy::Leftovers::default()
+            });
         }
         // 펼침 등으로 콘텐츠 높이가 바뀐 뒤 한 번 더 맞춘다(첫 프레임의 맨 아래는 옛 높이 기준이라).
         if sn.frames == 3 {
@@ -2036,7 +2046,7 @@ impl SettingsApp {
                 if dark { "dark" } else { "light" },
                 off,
                 if bottom { "-bottom" } else { "" },
-                ["", "-clipoff", "-detail", "-mid"][variant as usize]
+                ["", "-clipoff", "-detail", "-mid", "-legacy"][variant as usize]
             );
             let path = sn.dir.join(name);
             let _ = std::fs::create_dir_all(&sn.dir);
