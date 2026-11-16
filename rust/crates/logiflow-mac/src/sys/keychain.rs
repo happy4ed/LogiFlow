@@ -95,3 +95,28 @@ pub fn selftest() -> i32 {
         1
     }
 }
+
+/// `--keychain-check=<값>` — CI: 키체인의 암호문구가 값과 같은지(값은 출력하지 않는다). 0 = 같음.
+/// `security find-generic-password` 는 다른 프로그램이라 항목 접근을 묻는 창이 떠 러너가 멈춘다 — 앱 자신으로 확인한다.
+pub fn check(expected: &str) -> i32 {
+    match get_generic_password(SERVICE, ACCOUNT) {
+        Ok(v) if v == expected.as_bytes() => {
+            println!("keychain clipSecret: 같음");
+            0
+        }
+        Ok(_) => {
+            println!("keychain clipSecret: 다름");
+            1
+        }
+        Err(e) => {
+            println!("keychain clipSecret: 읽기 실패({})", e.code());
+            2
+        }
+    }
+}
+
+/// `--keychain-forget` — CI 정리: 암호문구 항목 지우기.
+pub fn forget() -> i32 {
+    delete();
+    0
+}

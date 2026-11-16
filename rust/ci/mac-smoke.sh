@@ -84,8 +84,8 @@ echo "--- config.txt(옮긴 뒤)"; sed 's/^clipSecret=.*/clipSecret=<가림>/' "
 if [ "${KEYCHAIN_OK:-0}" = 1 ]; then
   if grep -q '^clipSecret=.\+' "$SUP/config.txt"; then echo "평문 암호문구가 파일에 남음"; kill "$AGENT"; exit 1; fi
   grep -q '^clipSecretDpapi=keychain' "$SUP/config.txt" || { echo "키체인 표시 없음"; kill "$AGENT"; exit 1; }
-  GOT=$(security find-generic-password -s com.happy4ed.logiflow.rs -a clipSecret -w)
-  [ "$GOT" = "$SECRET" ] || { echo "키체인 값이 다름"; kill "$AGENT"; exit 1; }
+  # security(다른 프로그램)로 읽으면 접근 허용 창이 떠 멈춘다 — 앱 자신으로 비교.
+  "$EXE" --keychain-check="$SECRET" || { echo "키체인 값이 다름"; kill "$AGENT"; exit 1; }
   echo "암호문구 키체인 옮기기 ok"
 else
   grep -q "^clipSecret=$SECRET" "$SUP/config.txt" || { echo "키체인 실패인데 파일 암호문구가 사라짐"; kill "$AGENT"; exit 1; }
@@ -95,6 +95,6 @@ fi
 grep "키체인" "$SUP/logs/logiflow-diag.log" || true
 kill "$AGENT" || true
 sleep 1
-security delete-generic-password -s com.happy4ed.logiflow.rs -a clipSecret >/dev/null 2>&1 || true
+"$EXE" --keychain-forget || true
 defaults delete com.happy4ed.logiflow || true
 echo "mac smoke ok"

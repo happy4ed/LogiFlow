@@ -134,9 +134,11 @@ jobs:
       - name: Keychain (write · read · delete a test item)
         id: keychain
         continue-on-error: true
+        timeout-minutes: 3
         run: |
           "$PWD/mac-out/app-under-test/LogiFlowRs.app/Contents/MacOS/LogiFlowRs" --keychain-selftest
       - name: Smoke — menu bar agent · Swift settings import · IPC · login item · second launch opens settings
+        timeout-minutes: 10
         env:
           KEYCHAIN_OK: ${{ steps.keychain.outcome == 'success' && '1' || '0' }}
         run: rust/ci/mac-smoke.sh "$PWD/mac-out/app-under-test/LogiFlowRs.app" "$PWD/mac-shots"
