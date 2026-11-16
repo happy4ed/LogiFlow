@@ -419,6 +419,22 @@ fn channel_label_does_not_repeat_default_name() {
 }
 
 #[test]
+fn menu_label_josa() {
+    use crate::config::josa_ro;
+    let mut c = AppConfig::default();
+    c.set_alias(1, "노트북");
+    c.set_alias(0, "이 PC");
+    assert_eq!(c.channel_label_to(1), "채널 2 · 노트북으로");
+    assert_eq!(c.channel_label_to(2), "채널 3으로");
+    assert_eq!(c.channel_label_to(0), "채널 1 · 이 PC로");
+    assert_eq!(josa_ro("회사"), "로");
+    assert_eq!(josa_ro("집"), "으로");
+    assert_eq!(josa_ro("거실"), "로");
+    assert_eq!(josa_ro("채널 1"), "로");
+    assert_eq!(josa_ro("채널 6"), "으로");
+}
+
+#[test]
 fn unknown_host_count_sends_nothing() {
     let be = backend(vec![mx()]);
     let log = DiagLogger::null();

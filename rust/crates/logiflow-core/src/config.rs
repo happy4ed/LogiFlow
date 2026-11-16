@@ -119,6 +119,13 @@ impl AppConfig {
         }
     }
 
+    /// 메뉴 항목용 「채널 2 · 노트북으로」·「채널 3으로」 — 조사를 이름 끝소리에 맞춘다.
+    pub fn channel_label_to(&self, channel: i32) -> String {
+        let l = self.channel_label(channel);
+        let ro = josa_ro(&l);
+        l + ro
+    }
+
     pub fn set_alias(&mut self, channel: i32, value: &str) {
         if value.is_empty() {
             self.aliases.retain(|(c, _)| *c != channel);
@@ -286,4 +293,23 @@ fn parse_attach(val: &str) -> Option<EdgeAttachment> {
         monitor_device_name: parts[1].to_string(),
         edge,
     })
+}
+
+/// 「(으)로」 — 끝 글자가 받침 있는 한글(ㄹ 받침 제외)이거나 그렇게 읽히는 숫자(0·3·6)면 「으로」, 아니면 「로」.
+pub fn josa_ro(s: &str) -> &'static str {
+    let last = s.trim_end().chars().last();
+    let euro = match last {
+        Some(c @ '\u{AC00}'..='\u{D7A3}') => {
+            let jong = (c as u32 - 0xAC00) % 28;
+            jong != 0 && jong != 8 // 8 = ㄹ
+        }
+        Some('0' | '3' | '6') => true,                                                     // 영·삼·육
+        Some(c) if c.is_ascii_alphabetic() => matches!(c.to_ascii_lowercase(), 'm' | 'n'), // 엠·엔
+        _ => false,
+    };
+    if euro {
+        "으로"
+    } else {
+        "로"
+    }
 }

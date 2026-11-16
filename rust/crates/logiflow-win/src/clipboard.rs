@@ -396,6 +396,119 @@ pub fn local_ips() -> Vec<String> {
     ips.into_iter().map(|ip| ip.to_string()).collect()
 }
 
+/// 이 PC 의 IPv4 주소 하나와 그 네트워크.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LocalAddr {
+    pub ip: String,
+    /// 쉬운 말 네트워크 이름(「유선 랜(이더넷)」·「와이파이(Wi-Fi)」·「가상 어댑터(vEthernet (WSL))」).
+    pub network: String,
+    /// WSL·Hyper-V 스위치·VirtualBox 등 — 다른 PC 와 연결할 때는 보통 쓰지 않는다.
+    pub virtual_adapter: bool,
+}
+
+/// 켜져 있는 네트워크 어댑터의 IPv4 주소(어댑터 이름 포함). 실제 랜·와이파이 먼저, 가상 어댑터는 뒤.
+/// 어댑터 목록을 못 읽으면 호스트 이름 조회(local_ips)로 대신하고 네트워크 이름은 비운다.
+pub fn local_addresses() -> Vec<LocalAddr> {
+    let mut out = adapters_ipv4().unwrap_or_else(|| {
+        local_ips()
+            .into_iter()
+            .map(|ip| LocalAddr {
+                ip,
+                network: String::new(),
+                virtual_adapter: false,
+            })
+            .collect()
+    });
+    let rank = |a: &LocalAddr| {
+        let o: Vec<u8> = a.ip.split('.').filter_map(|x| x.parse().ok()).collect();
+        let lan = match o.as_slice() {
+            [192, 168, ..] => 0,
+            [10, ..] => 1,
+            [172, b, ..] if (16..=31).contains(b) => 2,
+            _ => 3,
+        };
+        (a.virtual_adapter as u8, lan)
+    };
+    out.sort_by_key(rank);
+    out
+}
+
+fn adapters_ipv4() -> Option<Vec<LocalAddr>> {
+    use windows::Win32::Foundation::ERROR_BUFFER_OVERFLOW;
+    use windows::Win32::NetworkManagement::IpHelper::{
+        GetAdaptersAddresses, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211,
+        IP_ADAPTER_ADDRESSES_LH,
+    };
+    use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
+    use windows::Win32::Networking::WinSock::{AF_INET, SOCKADDR_IN};
+    let flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    let mut size: u32 = 16 * 1024;
+    let mut buf: Vec<u64> = vec![0; (size as usize).div_ceil(8)];
+    let mut rc = 0;
+    for _ in 0..3 {
+        rc = unsafe { GetAdaptersAddresses(AF_INET.0 as u32, flags, None, Some(buf.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH), &mut size) };
+        if rc == ERROR_BUFFER_OVERFLOW.0 {
+            buf = vec![0; (size as usize).div_ceil(8)];
+            continue;
+        }
+        break;
+    }
+    if rc != 0 {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut p = buf.as_ptr() as *const IP_ADAPTER_ADDRESSES_LH;
+    while !p.is_null() {
+        let a = unsafe { &*p };
+        p = a.Next;
+        if a.OperStatus != IfOperStatusUp {
+            continue;
+        }
+        let friendly = unsafe { a.FriendlyName.to_string() }.unwrap_or_default();
+        let desc = unsafe { a.Description.to_string() }.unwrap_or_default();
+        let d = desc.to_ascii_lowercase();
+        // 게스트 VM 의 실제 랜 카드(「Hyper-V Network Adapter」)는 가상으로 보지 않는다 — 호스트 쪽 가상 스위치만.
+        let virtual_adapter = friendly.starts_with("vEthernet")
+            || d.contains("virtual ethernet adapter")
+            || d.contains("virtualbox")
+            || d.contains("vmware")
+            || d.contains("loopback")
+            || d.contains("wsl");
+        let network = if virtual_adapter {
+            format!("가상 어댑터({})", friendly)
+        } else if a.IfType == IF_TYPE_IEEE80211 {
+            format!("와이파이({})", friendly)
+        } else if a.IfType == IF_TYPE_ETHERNET_CSMACD {
+            format!("유선 랜({})", friendly)
+        } else {
+            friendly.clone()
+        };
+        let mut u = a.FirstUnicastAddress;
+        while !u.is_null() {
+            let ua = unsafe { &*u };
+            u = ua.Next;
+            let sa = ua.Address.lpSockaddr;
+            if sa.is_null() || unsafe { (*sa).sa_family } != AF_INET {
+                continue;
+            }
+            let sin = unsafe { &*(sa as *const SOCKADDR_IN) };
+            let ip = std::net::Ipv4Addr::from(u32::from_be(unsafe { sin.sin_addr.S_un.S_addr }));
+            if ip.is_loopback() || ip.is_link_local() || ip.is_unspecified() {
+                continue;
+            }
+            let ip = ip.to_string();
+            if !out.iter().any(|x: &LocalAddr| x.ip == ip) {
+                out.push(LocalAddr {
+                    ip,
+                    network: network.clone(),
+                    virtual_adapter,
+                });
+            }
+        }
+    }
+    Some(out)
+}
+
 fn computer_dns_name() -> String {
     use windows::core::PWSTR;
     use windows::Win32::System::SystemInformation::{ComputerNameDnsHostname, GetComputerNameExW};

@@ -82,17 +82,30 @@ jobs:
           Copy-Item rust/target/aarch64-pc-windows-msvc/release/LogiFlowRs.exe rust/dist/arm64/
           Get-ChildItem rust/dist -Recurse -File | ForEach-Object { "{0,-40} {1,10:N0} bytes" -f $_.FullName.Replace((Get-Location).Path, ''), $_.Length }
 
+      # 실행 시험은 배포 폴더(rust/dist)가 아니라 임시 사본에서 — 실행 파일 옆에 생기는 logs/ 가 zip 에 들어가지 않게
+      # (rs.3 zip 에 x64/logs/logiflow-diag.log 가 섞여 나감).
       - name: Startup smoke test (no devices on runner)
         shell: pwsh
-        run: ./rust/ci/smoke.ps1 -Exe "$pwd/rust/dist/x64/LogiFlowRs.exe"
+        run: |
+          $run = Join-Path $env:RUNNER_TEMP 'lf-run'
+          New-Item $run -ItemType Directory -Force | Out-Null
+          Copy-Item rust/dist/x64/LogiFlowRs.exe $run/
+          ./rust/ci/smoke.ps1 -Exe "$run/LogiFlowRs.exe"
 
       - name: Settings window snapshots (3 screens × light/dark)
         shell: pwsh
         continue-on-error: true
         run: |
-          $p = Start-Process -FilePath rust/dist/x64/LogiFlowRs.exe -ArgumentList "--ui-snapshot=$pwd/rust/snapshots" -PassThru
+          $p = Start-Process -FilePath "$env:RUNNER_TEMP/lf-run/LogiFlowRs.exe" -ArgumentList "--ui-snapshot=$pwd/rust/snapshots" -PassThru
           if (-not $p.WaitForExit(180000)) { Stop-Process -Id $p.Id -Force; Write-Host 'snapshot timeout' }
           Get-ChildItem rust/snapshots -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }
+
+      - name: Package inputs are only the executables
+        shell: pwsh
+        run: |
+          $extra = Get-ChildItem rust/dist/x64, rust/dist/arm64 -Recurse -Force | Where-Object { $_.Name -ne 'LogiFlowRs.exe' }
+          if ($extra) { $extra | ForEach-Object { Write-Host "unexpected: $($_.FullName)" }; throw 'dist has files other than LogiFlowRs.exe' }
+          Write-Host 'dist: x64/LogiFlowRs.exe + arm64/LogiFlowRs.exe only'
 
       - name: Installer, ZIP, checksums
         shell: pwsh
@@ -110,6 +123,16 @@ jobs:
           $lines = foreach ($n in $names) { $h = (Get-FileHash "rust/dist/$n" -Algorithm SHA256).Hash.ToLowerInvariant(); "$h  $n" }
           $lines | Set-Content "rust/dist/LogiFlowRs-v$env:VERSION-SHA256SUMS.txt" -Encoding utf8
           Get-Content "rust/dist/LogiFlowRs-v$env:VERSION-SHA256SUMS.txt"
+          # zip 안에 로그가 섞이면 실패(실행 파일 2개만 있어야 함).
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
+          $names = $z.Entries | ForEach-Object { $_.FullName.Replace('\','/') }
+          $z.Dispose()
+          $names | ForEach-Object { Write-Host "  zip: $_" }
+          $bad = $names | Where-Object { $_ -match '(^|/)logs/' -or $_ -match '\.log$' }
+          if ($bad) { throw "zip contains logs: $($bad -join ', ')" }
+          $exes = $names | Where-Object { $_ -match 'LogiFlowRs\.exe$' }
+          if ($exes.Count -ne 2) { throw "zip should hold exactly 2 executables, got $($exes.Count)" }
 
       - uses: actions/upload-artifact@v4
         with:

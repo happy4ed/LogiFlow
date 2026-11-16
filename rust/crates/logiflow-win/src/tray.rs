@@ -266,7 +266,8 @@ fn show_menu() {
             any = true;
             items.push(MenuItem::Item {
                 id: ID_CHANNEL + h as u32,
-                text: t.config.channel_label(h),
+                // 동사를 붙여 상태 목록이 아니라 누르면 넘어가는 항목임을 알게(창의 「모두 전환」과 같은 동작).
+                text: format!("{} 모두 전환", t.config.channel_label_to(h)),
                 enabled: true,
             });
         }

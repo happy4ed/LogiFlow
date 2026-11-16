@@ -71,7 +71,7 @@ pub struct SettingsApp {
     firewall_on: Arc<Mutex<Option<bool>>>,
     probe_installed: Arc<Mutex<Option<bool>>>,
     /// 이 PC 주소(호스트 이름 조회라 느릴 수 있어 백그라운드 1회).
-    local_ips: Arc<Mutex<Option<Vec<String>>>>,
+    local_ips: Arc<Mutex<Option<Vec<clipboard::LocalAddr>>>>,
     canvas: Canvas,
     /// 채널 배치 되돌리기(바꾸기 전 배치를 쌓는다).
     layout_undo: Vec<Vec<EdgeAttachment>>,
@@ -107,10 +107,10 @@ pub struct Snapshot {
 }
 
 /// 이 PC 주소 다시 조회(설정 화면을 열 때마다 — 와이파이·VPN 으로 바뀌었을 수 있다). 조회 중엔 옛 값 유지.
-fn refresh_ips(slot: &Arc<Mutex<Option<Vec<String>>>>) {
+fn refresh_ips(slot: &Arc<Mutex<Option<Vec<clipboard::LocalAddr>>>>) {
     let slot = slot.clone();
     std::thread::spawn(move || {
-        let v = clipboard::local_ips();
+        let v = clipboard::local_addresses();
         *slot.lock().unwrap() = Some(v);
     });
 }
@@ -632,22 +632,11 @@ impl SettingsApp {
             self.set_layout(cfg, att);
         }
         y += canvas_h + 8.0;
-        // 캔버스 바로 아래: 왼쪽 「채널 모두 떼기」(붙인 채널이 있을 때) · 오른쪽 「되돌리기」(바꾼 적이 있을 때).
+        // 캔버스 바로 아래 오른쪽 「되돌리기」(배치를 바꾼 적이 있을 때). rs.4: 「채널 모두 떼기」는 뺐다 — 결과가
+        // 「사용」 스위치를 끈 것과 같아(밀어도 안 넘어감) 잠깐 끄려던 사람이 배치를 지우게 됐다(8차 첫 사용 점검).
+        // 하나씩 떼기는 상자를 멀리 끌어 놓으면 되고, 실수는 「되돌리기」로.
         let bh = pc.btn_h();
         let mut row = false;
-        if !cfg.attachments.is_empty() {
-            let rw = pc.btn_w("채널 모두 떼기", None);
-            if pc.button("reset", x0, y, rw, bh, "채널 모두 떼기", None, Variant::Default, true)
-                && self.ask(
-                    "모니터에 붙인 채널 상자를 모두 뗄까요?\r\n떼면 가장자리로 밀어도 넘어가지 않습니다.\r\n모니터 그림 바로 아래 오른쪽에 생기는 「되돌리기」로 되살릴 수 있습니다.",
-                    "채널 모두 떼기",
-                )
-            {
-                let att = self.canvas.clear_placements();
-                self.set_layout(cfg, att);
-            }
-            row = true;
-        }
         if !self.layout_undo.is_empty() {
             let uw = pc.btn_w("되돌리기", None);
             if pc.button("undo", x0 + w - uw, y, uw, bh, "되돌리기", None, Variant::Default, true) {
@@ -942,8 +931,8 @@ impl SettingsApp {
         }
     }
 
-    /// 전환할 채널 메뉴(지금 채널 제외). 고른 채널 또는 None.
-    fn channel_menu(&self, ctx: &egui::Context, anchor: Pos2, hosts: i32, current: i32, cfg: &AppConfig) -> Option<i32> {
+    /// 전환할 채널 메뉴(지금 채널 제외). 항목은 「채널 2 · 노트북으로 전환」처럼 동사까지. 고른 채널 또는 None.
+    fn channel_menu(&self, ctx: &egui::Context, anchor: Pos2, hosts: i32, current: i32, cfg: &AppConfig, verb: &str) -> Option<i32> {
         let mut items = Vec::new();
         for h in 0..hosts {
             if h == current {
@@ -951,7 +940,7 @@ impl SettingsApp {
             }
             items.push(notify::MenuItem::Item {
                 id: 200 + h as u32,
-                text: cfg.channel_label(h),
+                text: format!("{} {}", cfg.channel_label_to(h), verb),
                 enabled: true,
             });
         }
@@ -972,7 +961,7 @@ impl SettingsApp {
 
     fn device_switch_menu(&mut self, ctx: &egui::Context, anchor: Pos2, d: &ScanResult, max_host: i32, cfg: &AppConfig) {
         let hosts = if d.host_count > 0 { d.host_count } else { max_host };
-        let Some(target) = self.channel_menu(ctx, anchor, hosts, d.current_host, cfg) else {
+        let Some(target) = self.channel_menu(ctx, anchor, hosts, d.current_host, cfg, "전환") else {
             return;
         };
         if self.busy {
@@ -994,7 +983,7 @@ impl SettingsApp {
     }
 
     fn all_switch_menu(&mut self, ctx: &egui::Context, anchor: Pos2, sw: &[ScanResult], max_host: i32, current: i32, cfg: &AppConfig) {
-        let Some(target) = self.channel_menu(ctx, anchor, max_host, current, cfg) else {
+        let Some(target) = self.channel_menu(ctx, anchor, max_host, current, cfg, "모두 전환") else {
             return;
         };
         if self.busy {
@@ -1249,14 +1238,26 @@ impl SettingsApp {
                 };
                 y += row_text(pc, cx, y, w, 0.0, &line);
             }
-            for (i, ip) in ips.iter().enumerate() {
+            for (i, addr) in ips.iter().enumerate() {
                 divider(pc, cx, y, w);
+                let ip = &addr.ip;
+                // 어느 네트워크 주소인지 먼저 — 상대 PC 와 같은 네트워크(같은 공유기)의 주소를 넣는다.
+                let net = if addr.network.is_empty() {
+                    String::new()
+                } else {
+                    format!("{} 주소입니다. ", addr.network)
+                };
                 let line = if i == 0 {
-                    Line::new("이 PC 주소", "상대 PC 의 「상대 PC 주소」에 이 값만 넣습니다(포트는 넣지 않음).")
+                    Line::new(
+                        "이 PC 주소",
+                        format!("{}상대 PC 의 「상대 PC 주소」에 이 값만 넣습니다(포트는 넣지 않음).", net),
+                    )
+                } else if addr.virtual_adapter {
+                    Line::new("이 PC 의 다른 주소", format!("{}다른 PC 와 연결할 때는 보통 쓰지 않습니다.", net))
                 } else {
                     Line::new(
                         "이 PC 의 다른 주소",
-                        "위 주소로 연결되지 않으면 상대 PC 의 「상대 PC 주소」에 이 주소를 넣어 보세요.",
+                        format!("{}상대 PC 가 이 네트워크에 있으면 상대 PC 의 「상대 PC 주소」에 이 주소를 넣으세요.", net),
                     )
                 };
                 let copied = matches!(self.copied, Some((k, t)) if k == i && t.elapsed().as_secs_f32() < 2.0);
@@ -1280,37 +1281,7 @@ impl SettingsApp {
             }
             // Windows 방화벽
             divider(pc, cx, y, w);
-            let fw = *self.firewall_on.lock().unwrap();
-            let line = Line::new(
-                "Windows 방화벽",
-                format!(
-                    "상대 PC 가 이 PC 로 보내려면 포트 {}번을 열어 두어야 합니다. 바꿀 때 관리자 승인이 필요합니다.",
-                    cfg.clip_port
-                ),
-            );
-            let (hit, h) = match fw {
-                None => (None, row_text(pc, cx, y, w, 0.0, &line.value("확인 중…", p.muted))),
-                Some(true) => buttons_row(pc, "fwoff", cx, y, w, line.value("허용됨", p.ink), &[("허용 해제", None, Variant::Default)]),
-                Some(false) => buttons_row(pc, "fwon", cx, y, w, line.value("허용 규칙 없음", p.warn), &[("허용", None, Variant::Default)]),
-            };
-            if hit.is_some() {
-                let failed = match fw {
-                    Some(false) => (!firewall::request_allow(cfg.clip_port))
-                        .then_some("허용하지 못했습니다(취소했거나 관리자 승인이 막혔습니다). 회사 관리 PC 는 정책이 막을 수 있습니다."),
-                    Some(true) => (self.ask(
-                        "방화벽 허용을 해제할까요?\r\n해제하면 상대 PC 가 이 PC 로 클립보드를 보내지 못합니다.",
-                        "Windows 방화벽",
-                    ) && !firewall::request_remove())
-                    .then_some("해제하지 못했습니다(취소했거나 관리자 승인이 막혔습니다)."),
-                    None => None,
-                };
-                if let Some(t) = failed {
-                    self.msg(t, "Windows 방화벽", MB_OK | MB_ICONWARNING);
-                }
-                let port = cfg.clip_port;
-                spawn_check(&self.firewall_on, move || firewall::allowed_for_port(port));
-            }
-            y += h;
+            y += self.firewall_row(pc, cx, y, w, cfg, false);
             // 연결 확인 — 마지막 결과를 상태로 남긴다.
             divider(pc, cx, y, w);
             let line = Line::new("연결 확인", "상대 PC 로 시험 글을 한 번 보냅니다. 상대 PC 에서 붙여 넣어 확인하세요.");
@@ -1343,6 +1314,10 @@ impl SettingsApp {
                 self.msg(&r, "연결 확인", MB_OK | MB_ICONINFORMATION);
             }
             y += h;
+        } else if *self.firewall_on.lock().unwrap() == Some(true) {
+            // 공유를 꺼도 허용 규칙은 남는다 — 보이게 두어 해제할 수 있게.
+            divider(pc, cx, y, w);
+            y += self.firewall_row(pc, cx, y, w, cfg, true);
         }
         pc.card_end(slot, cx, top, w, y - top);
         y += 18.0;
@@ -1367,6 +1342,47 @@ impl SettingsApp {
         y += h;
         pc.card_end(slot, cx, top, w, y - top);
         y + 28.0
+    }
+
+    /// 「Windows 방화벽」 줄. sharing_off = 공유를 끈 상태(규칙이 남아 있을 때만 불림). 줄 높이.
+    fn firewall_row(&mut self, pc: &Pc<'_>, cx: f32, y: f32, w: f32, cfg: &AppConfig, sharing_off: bool) -> f32 {
+        let p = pc.pal;
+        let fw = *self.firewall_on.lock().unwrap();
+        let desc = if sharing_off {
+            format!(
+                "클립보드 공유를 꺼도 포트 {}번 허용 규칙은 남아 있습니다. 쓰지 않으면 해제하세요(관리자 승인 필요).",
+                cfg.clip_port
+            )
+        } else {
+            format!(
+                "상대 PC 가 이 PC 로 보내려면 포트 {}번을 열어 두어야 합니다. 바꿀 때 관리자 승인이 필요합니다.",
+                cfg.clip_port
+            )
+        };
+        let line = Line::new("Windows 방화벽", desc);
+        let (hit, h) = match fw {
+            None => (None, row_text(pc, cx, y, w, 0.0, &line.value("확인 중…", p.muted))),
+            Some(true) => buttons_row(pc, "fwoff", cx, y, w, line.value("허용됨", p.ink), &[("허용 해제", None, Variant::Default)]),
+            Some(false) => buttons_row(pc, "fwon", cx, y, w, line.value("허용 규칙 없음", p.warn), &[("허용", None, Variant::Default)]),
+        };
+        if hit.is_some() {
+            let failed = match fw {
+                Some(false) => (!firewall::request_allow(cfg.clip_port))
+                    .then_some("허용하지 못했습니다(취소했거나 관리자 승인이 막혔습니다). 회사 관리 PC 는 정책이 막을 수 있습니다."),
+                Some(true) => (self.ask(
+                    "방화벽 허용을 해제할까요?\r\n해제하면 상대 PC 가 이 PC 로 클립보드를 보내지 못합니다.",
+                    "Windows 방화벽",
+                ) && !firewall::request_remove())
+                .then_some("해제하지 못했습니다(취소했거나 관리자 승인이 막혔습니다)."),
+                None => None,
+            };
+            if let Some(t) = failed {
+                self.msg(t, "Windows 방화벽", MB_OK | MB_ICONWARNING);
+            }
+            let port = cfg.clip_port;
+            spawn_check(&self.firewall_on, move || firewall::allowed_for_port(port));
+        }
+        h
     }
 
     fn toggle_prelogon(&mut self, on: bool, cfg: &AppConfig) {
@@ -1846,6 +1862,13 @@ impl SettingsApp {
             s.config.theme = if dark { ThemeMode::Dark } else { ThemeMode::Light };
             s.config.font_offset = off;
             s.config.clip_enabled = variant != 1;
+            drop(s);
+            // 공유를 끈 화면은 「허용 규칙이 남아 있는」 모양으로 찍는다(방화벽 줄이 접히지 않는지 보려고).
+            if variant == 1 {
+                *self.firewall_on.lock().unwrap() = Some(true);
+            } else if variant == 0 {
+                *self.firewall_on.lock().unwrap() = Some(false);
+            }
         }
         // 펼침 등으로 콘텐츠 높이가 바뀐 뒤 한 번 더 맞춘다(첫 프레임의 맨 아래는 옛 높이 기준이라).
         if sn.frames == 3 {
