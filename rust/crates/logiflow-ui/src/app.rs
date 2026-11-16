@@ -8,20 +8,19 @@
 
 use crate::canvas::{Canvas, Screen};
 use crate::paint::{c, nav_button, thumb_color, Icon, Pc, Variant};
+use crate::platform::sys;
 use egui::{Color32, CornerRadius, Event, Id, MouseWheelUnit, Pos2, Rect, Sense, Ui, Vec2, ViewportBuilder, ViewportCommand, ViewportId};
 use logiflow_core::config::{AppConfig, EdgeAttachment, ThemeMode};
 use logiflow_core::log::read_lines;
 use logiflow_core::probe_result::{self, ProbeVerdict};
 use logiflow_core::scan::{self, looks_like_keyboard, ScanResult};
 use logiflow_core::theme::{Palette, Rgb};
-use logiflow_win::util::message_box;
-use logiflow_win::wnd::Hwnd;
-use logiflow_win::{clipboard, firewall, ipc, legacy, monitors, notify, paths, prelogon, probe, prompt, theme_sys, tray};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use windows::Win32::Foundation::{HWND, POINT};
-use windows::Win32::Graphics::Gdi::ClientToScreen;
-use windows::Win32::UI::WindowsAndMessaging::*;
+use sys::dialog::*;
+use sys::util::message_box;
+use sys::wnd::Hwnd;
+use sys::{clipboard, firewall, ipc, legacy, monitors, notify, paths, prelogon, probe, prompt, theme_sys, tray};
 
 pub const CONTENT_MAX: f32 = 560.0;
 const SIDEBAR_W: f32 = 182.0;
@@ -239,16 +238,9 @@ impl SettingsApp {
         self.msg(text, title, MB_YESNO | MB_ICONQUESTION) == IDYES
     }
 
-    /// egui 좌표(point) → 화면 물리 좌표(메뉴 위치).
+    /// egui 좌표(point) → 화면 좌표(메뉴 위치). Windows 는 물리 픽셀, Mac 은 point(OS 별 dialog::to_screen).
     fn screen_point(&self, ctx: &egui::Context, p: Pos2) -> (i32, i32) {
-        let ppp = ctx.pixels_per_point();
-        let mut origin = POINT::default();
-        if let Some(h) = self.hwnd {
-            unsafe {
-                let _ = ClientToScreen(h, &mut origin);
-            }
-        }
-        (origin.x + (p.x * ppp) as i32, origin.y + (p.y * ppp) as i32)
+        to_screen(self.hwnd, p.x, p.y, ctx.pixels_per_point())
     }
 
     fn menu(&self, ctx: &egui::Context, anchor_bottom_left: Pos2, items: &[notify::MenuItem]) -> u32 {
@@ -332,13 +324,16 @@ fn come_back_all(sw: &[ScanResult], current: i32) -> String {
 }
 
 fn log_dir() -> std::path::PathBuf {
-    logiflow_win::util::exe_dir().join("logs")
+    sys::util::exe_dir().join("logs")
 }
 fn has_logs() -> bool {
     std::fs::read_dir(log_dir()).map(|mut d| d.next().is_some()).unwrap_or(false)
 }
 
+#[cfg(not(target_os = "macos"))]
 const LICENSE_BODY: &str = "LogiFlow\r\n로지텍 Easy-Switch 모니터 가장자리 자동 전환\r\n\r\nMIT License\r\n\r\nCopyright (c) 2026 happy4ed\r\n\r\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\r\n\r\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\r\n\r\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\r\n\r\n─────────────────────────────\r\n구성 / 사용 기술\r\n• Rust · egui / eframe · wgpu (MIT / Apache-2.0)\r\n• windows-rs (Microsoft, MIT / Apache-2.0) — Windows HID / SetupAPI — Logitech HID++ 2.0 (feature 0x1814 Change Host)\r\n• windows-service · arboard · png (MIT / Apache-2.0)\r\n• RustCrypto aes · cbc · hmac · sha1 · sha2 · pbkdf2 (MIT / Apache-2.0)\r\n• chrono · unicode-normalization · getrandom · subtle (MIT / Apache-2.0 · BSD-3-Clause)\r\n• 설치 패키지: Inno Setup\r\n";
+#[cfg(target_os = "macos")]
+const LICENSE_BODY: &str = "LogiFlow\r\n로지텍 Easy-Switch 모니터 가장자리 자동 전환\r\n\r\nMIT License\r\n\r\nCopyright (c) 2026 happy4ed\r\n\r\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\r\n\r\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\r\n\r\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\r\n\r\n─────────────────────────────\r\n구성 / 사용 기술\r\n• Rust · egui / eframe · wgpu (MIT / Apache-2.0)\r\n• objc2 · objc2-app-kit (MIT) — macOS IOKit HID — Logitech HID++ 2.0 (feature 0x1814 Change Host)\r\n• arboard · png (MIT / Apache-2.0)\r\n• RustCrypto aes · cbc · hmac · sha1 · sha2 · pbkdf2 (MIT / Apache-2.0)\r\n• chrono · unicode-normalization · getrandom · subtle · skrifa (MIT / Apache-2.0 · BSD-3-Clause)\r\n";
 
 impl eframe::App for SettingsApp {
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
@@ -668,6 +663,7 @@ impl SettingsApp {
         } else {
             vec!["이 PC".into()]
         };
+        let this_pc: Vec<String> = this_pc.iter().map(|t| crate::os_text(t).into_owned()).collect();
         if let Some(att) = self.canvas.show(
             pc.ui,
             pc.origin + Vec2::new(x0, y),
@@ -1140,32 +1136,35 @@ impl SettingsApp {
             self.apply(|c| c.auto_start = !c.auto_start);
         }
         y += h;
-        divider(pc, cx, y, w);
-        let installed = *self.prelogon_installed.lock().unwrap();
-        let (hit, h) = toggle_row(
-            pc,
-            "prelogon",
-            cx,
-            y,
-            w,
-            Line::new(
-                "로그인 전에도 실행",
-                "PC 를 켠 직후의 로그인 화면과 잠금 화면에서도 가장자리로 밀면 넘어갑니다. 켜고 끌 때 관리자 승인이 필요하고, 「전환 관리」의 채널 배치를 그대로 씁니다.",
-            ),
-            installed,
-        );
-        if hit {
-            self.toggle_prelogon(!installed, cfg);
+        // 로그인 전에도 실행 — Windows 만(서비스·로그인 화면). Mac 에는 없음.
+        if CAPS.prelogon {
+            divider(pc, cx, y, w);
+            let installed = *self.prelogon_installed.lock().unwrap();
+            let (hit, h) = toggle_row(
+                pc,
+                "prelogon",
+                cx,
+                y,
+                w,
+                Line::new(
+                    "로그인 전에도 실행",
+                    "PC 를 켠 직후의 로그인 화면과 잠금 화면에서도 가장자리로 밀면 넘어갑니다. 켜고 끌 때 관리자 승인이 필요하고, 「전환 관리」의 채널 배치를 그대로 씁니다.",
+                ),
+                installed,
+            );
+            if hit {
+                self.toggle_prelogon(!installed, cfg);
+            }
+            y += h - ROW_V + 2.0;
+            // 테스트로 가는 길(화면 이동이라 링크).
+            let link = "진단 화면에서 테스트하기";
+            let lw = pc.btn_w(link, None);
+            if pc.button("gotest", cx + PX - 14.0, y, lw, bh, link, None, Variant::Ghost, true) {
+                self.page = 2;
+                self.jump_test = true;
+            }
+            y += bh + ROW_V - 4.0;
         }
-        y += h - ROW_V + 2.0;
-        // 테스트로 가는 길(화면 이동이라 링크).
-        let link = "진단 화면에서 테스트하기";
-        let lw = pc.btn_w(link, None);
-        if pc.button("gotest", cx + PX - 14.0, y, lw, bh, link, None, Variant::Ghost, true) {
-            self.page = 2;
-            self.jump_test = true;
-        }
-        y += bh + ROW_V - 4.0;
         pc.card_end(slot, cx, top, w, y - top);
         y += 18.0;
 
@@ -1187,7 +1186,7 @@ impl SettingsApp {
             use_line.status("아직 못 씀 — 암호문구를 넣어 주세요", p.warn)
         } else if !clip_running {
             use_line.status("시작하지 못함 — 다른 프로그램이 포트를 쓰고 있을 수 있습니다", p.warn)
-        } else if fw_now == Some(false) {
+        } else if CAPS.firewall && fw_now == Some(false) {
             use_line.status("받기가 막혀 있을 수 있음 — 아래 「Windows 방화벽」에서 허용하세요", p.warn)
         } else {
             use_line.status("주고받을 준비됨", p.ink)
@@ -1329,9 +1328,11 @@ impl SettingsApp {
                 }
                 y += h;
             }
-            // Windows 방화벽
-            divider(pc, cx, y, w);
-            y += self.firewall_row(pc, cx, y, w, cfg, false);
+            // Windows 방화벽(Mac 에서는 숨김 — 들어오는 연결을 시스템이 처음 한 번 묻는다).
+            if CAPS.firewall {
+                divider(pc, cx, y, w);
+                y += self.firewall_row(pc, cx, y, w, cfg, false);
+            }
             // 연결 확인 — 마지막 결과를 상태로 남긴다.
             divider(pc, cx, y, w);
             let line = Line::new("연결 확인", "상대 PC 로 시험 글을 한 번 보냅니다. 상대 PC 에서 붙여 넣어 확인하세요.");
@@ -1358,13 +1359,13 @@ impl SettingsApp {
                     (Some(if ok { 2u8 } else { 0 }), m)
                 };
                 if let Some(ok) = ok {
-                    let hm = logiflow_win::session::local_time_hms().get(..5).unwrap_or("").to_string();
+                    let hm = sys::session::local_time_hms().get(..5).unwrap_or("").to_string();
                     self.last_link = Some((ok, hm, link_key.clone()));
                 }
                 self.msg(&r, "연결 확인", MB_OK | MB_ICONINFORMATION);
             }
             y += h;
-        } else if *self.firewall_on.lock().unwrap() == Some(true) {
+        } else if CAPS.firewall && *self.firewall_on.lock().unwrap() == Some(true) {
             // 공유를 꺼도 허용 규칙은 남는다 — 보이게 두어 해제할 수 있게.
             divider(pc, cx, y, w);
             y += self.firewall_row(pc, cx, y, w, cfg, true);
@@ -1408,7 +1409,7 @@ impl SettingsApp {
                 ""
             }
         );
-        let pick = logiflow_win::util::task_dialog(
+        let pick = sys::util::task_dialog(
             self.owner(),
             "LogiFlow",
             "기존 LogiFlow(이전 판)가 이 PC 에 남아 있습니다",
@@ -1427,7 +1428,7 @@ impl SettingsApp {
         let (step, fin, after) = (modal.step.clone(), modal.finished.clone(), modal.pre_logon_after.clone());
         let cfg2 = cfg.clone();
         std::thread::spawn(move || {
-            let log = logiflow_core::log::DiagLogger::new(&logiflow_win::util::exe_dir(), true);
+            let log = logiflow_core::log::DiagLogger::new(&sys::util::exe_dir(), true);
             *step.lock().unwrap() = "이전 판 앱을 지우는 중…".into();
             let mut lines = legacy::cleanup_user(&log);
             if then_enable_prelogon {
@@ -1756,7 +1757,11 @@ impl SettingsApp {
             pc,
             w,
             "진단",
-            "잘 안 될 때 기록을 남겨 원인을 찾고, 로그인 화면 전환이 이 PC 에서 되는지 미리 알아봅니다.",
+            if CAPS.probe {
+                "잘 안 될 때 기록을 남겨 원인을 찾고, 로그인 화면 전환이 이 PC 에서 되는지 미리 알아봅니다."
+            } else {
+                "잘 안 될 때 기록을 남겨 원인을 찾습니다."
+            },
         );
 
         // 기존 LogiFlow(이전 판)가 남아 있을 때만 — 정리 단추.
@@ -1806,23 +1811,26 @@ impl SettingsApp {
             self.apply(|c| c.diag_log_enabled = !c.diag_log_enabled);
         }
         y += h;
-        divider(pc, x0, y, w);
-        let (hit, h) = toggle_row(
-            pc,
-            "debug",
-            x0,
-            y,
-            w,
-            Line::new(
-                "상세 기록",
-                "「로그인 전에도 실행」을 켰는데도 로그인 화면에서 넘어가지 않을 때 켜세요. 커서 위치까지 자세히 남깁니다. 켜면 몇 초 뒤부터 남습니다.",
-            ),
-            cfg.debug_mode,
-        );
-        if hit {
-            self.apply(|c| c.debug_mode = !c.debug_mode);
+        // 상세 기록은 로그인 화면 워커용 — 로그인 전에도 실행이 있는 OS 에서만.
+        if CAPS.prelogon {
+            divider(pc, x0, y, w);
+            let (hit, h) = toggle_row(
+                pc,
+                "debug",
+                x0,
+                y,
+                w,
+                Line::new(
+                    "상세 기록",
+                    "「로그인 전에도 실행」을 켰는데도 로그인 화면에서 넘어가지 않을 때 켜세요. 커서 위치까지 자세히 남깁니다. 켜면 몇 초 뒤부터 남습니다.",
+                ),
+                cfg.debug_mode,
+            );
+            if hit {
+                self.apply(|c| c.debug_mode = !c.debug_mode);
+            }
+            y += h;
         }
-        y += h;
         divider(pc, x0, y, w);
         let (hit, h) = buttons_row(
             pc,
@@ -1836,7 +1844,7 @@ impl SettingsApp {
         if hit.is_some() {
             let dir = log_dir();
             let _ = std::fs::create_dir_all(&dir);
-            logiflow_win::util::open_with("explorer.exe", &dir);
+            sys::util::open_with("explorer.exe", &dir);
         }
         y += h;
         if has_logs() {
@@ -1872,7 +1880,10 @@ impl SettingsApp {
         pc.card_end(slot, x0, top, w, y - top);
         y += 18.0;
 
-        // 로그인 화면 테스트(읽기 전용 — 마우스·키보드를 넘기지 않음).
+        // 로그인 화면 테스트(읽기 전용 — 마우스·키보드를 넘기지 않음). Windows 만.
+        if !CAPS.probe {
+            return y + 10.0;
+        }
         self.test_y = y;
         y = section(pc, y, "로그인 화면 테스트");
         let slot = pc.card_begin();
@@ -1991,7 +2002,7 @@ impl SettingsApp {
             ProbeVerdict::NoMovement => "잠금 화면에는 갔지만 커서 움직임이 기록되지 않았습니다.\r\n잠금 화면에서 마우스를 20~30초 움직이며 다시 해 보세요.",
         };
         if self.ask(&format!("{}\r\n\r\n원본 기록 파일도 열까요?", text), title) {
-            logiflow_win::util::open_with("notepad.exe", &path);
+            sys::util::open_with("notepad.exe", &path);
         }
     }
 }

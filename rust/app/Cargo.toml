@@ -17,6 +17,10 @@ logiflow-core.workspace = true
 logiflow-win.workspace = true
 logiflow-ui.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+logiflow-mac.workspace = true
+logiflow-ui.workspace = true
+
 [build-dependencies]
 embed-manifest = "1.5"
 embed-resource = "3"

@@ -3,6 +3,7 @@
 
 pub mod autostart;
 pub mod clipboard;
+pub mod dialog;
 pub mod dpapi;
 pub mod edge_watcher;
 pub mod firewall;

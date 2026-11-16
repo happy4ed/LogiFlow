@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/logiflow-core", "crates/logiflow-win", "crates/logiflow-ui", "crates/logiflow-linux", "app"]
+members = ["crates/logiflow-core", "crates/logiflow-win", "crates/logiflow-ui", "crates/logiflow-linux", "crates/logiflow-mac", "app"]
 
 [workspace.package]
 version = "0.16.0"
@@ -11,6 +11,7 @@ license = "MIT"
 logiflow-core = { path = "crates/logiflow-core" }
 logiflow-win = { path = "crates/logiflow-win" }
 logiflow-ui = { path = "crates/logiflow-ui" }
+logiflow-mac = { path = "crates/logiflow-mac" }
 
 [profile.release]
 opt-level = 3

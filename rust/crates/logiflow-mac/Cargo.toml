@@ -1,0 +1,22 @@
+[package]
+name = "logiflow-mac"
+description = "LogiFlow macOS: IOKit HID, edge watching (NSEvent), glow overlay, menu bar, LaunchAgent, clipboard, Swift settings import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+logiflow-core.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-app-kit = "0.3"
+objc2-core-foundation = "0.3"
+objc2-core-graphics = "0.3"
+block2 = "0.6"
+core-foundation-sys = "0.8"
+arboard = { version = "3", default-features = false, features = ["image-data"] }
+png = "0.18"
+libc = "0.2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

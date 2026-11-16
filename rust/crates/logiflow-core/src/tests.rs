@@ -393,9 +393,11 @@ fn layout_snap_and_resolve() {
 
 #[test]
 fn tray_watch_needs_all_four_conditions() {
-    let mut c = AppConfig::default();
-    c.pre_logon = false;
-    c.edge_switch_enabled = true;
+    let mut c = AppConfig {
+        pre_logon: false,
+        edge_switch_enabled: true,
+        ..Default::default()
+    };
     assert!(c.tray_should_watch(true, 1));
     assert!(!c.tray_should_watch(false, 1), "배치 없음");
     assert!(!c.tray_should_watch(true, 0), "전환 가능 기기 없음");

@@ -105,6 +105,9 @@ impl<'a> Pc<'a> {
     }
 
     pub fn measure(&self, text: &str, base: f32, bold: bool) -> f32 {
+        // 화면 글을 이 OS 말로(Mac: 「이 PC」 → 「이 Mac」 등 · Windows 는 그대로).
+        let os = crate::os_text(text);
+        let text: &str = &os;
         self.painter().layout_no_wrap(text.to_string(), self.f(base, bold), Color32::WHITE).size().x
     }
     /// TextRenderer.MeasureText 근사(좌우 GDI 여백 포함).
@@ -115,12 +118,18 @@ impl<'a> Pc<'a> {
 
     /// 왼쪽 위 기준 한 줄 글자. 폭을 돌려준다.
     pub fn text(&self, x: f32, y: f32, text: &str, base: f32, bold: bool, color: Rgb) -> f32 {
+        // 화면 글을 이 OS 말로(Mac: 「이 PC」 → 「이 Mac」 등 · Windows 는 그대로).
+        let os = crate::os_text(text);
+        let text: &str = &os;
         let p = self.origin + Vec2::new(x, y);
         self.painter().text(p, Align2::LEFT_TOP, text, self.f(base, bold), c(color)).width()
     }
 
     /// 사각형 안에 정렬해 그리기(C# StringFormat Center/Near).
     pub fn text_in(&self, rect: Rect, text: &str, font: FontId, color: Color32, align: Align2) {
+        // 화면 글을 이 OS 말로(Mac: 「이 PC」 → 「이 Mac」 등 · Windows 는 그대로).
+        let os = crate::os_text(text);
+        let text: &str = &os;
         let pos = align.pos_in_rect(&rect);
         self.painter().text(pos, align, text, font, color);
     }
@@ -132,6 +141,9 @@ impl<'a> Pc<'a> {
 
     /// 폭 w 로 줄바꿈했을 때의 높이.
     pub fn wrap_h(&self, text: &str, base: f32, bold: bool, w: f32) -> f32 {
+        // 화면 글을 이 OS 말로(Mac: 「이 PC」 → 「이 Mac」 등 · Windows 는 그대로).
+        let os = crate::os_text(text);
+        let text: &str = &os;
         self.painter()
             .layout(keep_together(text), self.f(base, bold), Color32::WHITE, w.max(1.0))
             .size()
@@ -141,6 +153,9 @@ impl<'a> Pc<'a> {
     /// 폭 w 로 줄바꿈해 그린다. 높이를 정해 두지 않으므로 잘리지 않는다 — 글이 길거나 글자가 커지면 줄이 늘어난다.
     /// 그린 높이를 돌려준다.
     pub fn wrap(&self, x: f32, y: f32, w: f32, text: &str, base: f32, bold: bool, color: Rgb) -> f32 {
+        // 화면 글을 이 OS 말로(Mac: 「이 PC」 → 「이 Mac」 등 · Windows 는 그대로).
+        let os = crate::os_text(text);
+        let text: &str = &os;
         let galley = self.painter().layout(keep_together(text), self.f(base, bold), c(color), w.max(1.0));
         let h = galley.size().y;
         self.painter().galley(self.origin + Vec2::new(x, y), galley, c(color));
@@ -186,6 +201,9 @@ impl<'a> Pc<'a> {
 
     /// 고정 폭·높이 라벨(AutoSize=false). 줄바꿈하고 높이 밖은 잘림.
     pub fn text_box(&self, x: f32, y: f32, w: f32, h: f32, text: &str, base: f32, bold: bool, color: Rgb) {
+        // 화면 글을 이 OS 말로(Mac: 「이 PC」 → 「이 Mac」 등 · Windows 는 그대로).
+        let os = crate::os_text(text);
+        let text: &str = &os;
         let rect = self.r(x, y, w, h);
         let galley = self.painter().layout(text.replace("\r\n", "\n"), self.f(base, bold), c(color), w);
         self.painter()
@@ -195,6 +213,9 @@ impl<'a> Pc<'a> {
 
     /// 한 줄, 넘치면 … (AutoEllipsis).
     pub fn text_ellipsis(&self, x: f32, y: f32, w: f32, text: &str, base: f32, bold: bool, color: Rgb) {
+        // 화면 글을 이 OS 말로(Mac: 「이 PC」 → 「이 Mac」 등 · Windows 는 그대로).
+        let os = crate::os_text(text);
+        let text: &str = &os;
         let f = self.f(base, bold);
         let mut s = text.to_string();
         if self.painter().layout_no_wrap(s.clone(), f.clone(), Color32::WHITE).size().x > w {
@@ -242,6 +263,9 @@ impl<'a> Pc<'a> {
     /// ThemedButton. enabled=false 면 같은 모양으로 그리되 눌리지 않는다(C# 과 같게).
     #[allow(clippy::too_many_arguments)]
     pub fn button(&self, key: &str, x: f32, y: f32, w: f32, h: f32, text: &str, icon: Option<Icon>, variant: Variant, enabled: bool) -> bool {
+        // 화면 글을 이 OS 말로(Mac: 「이 PC」 → 「이 Mac」 등 · Windows 는 그대로).
+        let os = crate::os_text(text);
+        let text: &str = &os;
         let rect = self.r(x, y, w, h);
         let resp = self.click_area(key, rect);
         if enabled {

@@ -40,8 +40,8 @@ jobs:
         working-directory: rust
         run: |
           cargo fmt --all -- --check
-          cargo clippy -p logiflow-core -p logiflow-linux --all-targets -- -D warnings
-          cargo test -p logiflow-core -p logiflow-linux
+          cargo clippy -p logiflow-core -p logiflow-linux -p logiflow-mac --all-targets -- -D warnings
+          cargo test -p logiflow-core -p logiflow-linux -p logiflow-mac
       - name: Build x64 + arm64 (static musl — runs on any distro)
         working-directory: rust
         env:
@@ -83,3 +83,68 @@ jobs:
           path: out/*
           if-no-files-found: error
           compression-level: 0
+
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Resolve version
+        id: version
+        run: |
+          V=$(grep -m1 '^version = ' rust/Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: Format, lint, tests
+        working-directory: rust
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy -p logiflow-mac -p logiflow-ui -p logiflow-app --all-targets --target aarch64-apple-darwin -- -D warnings
+          cargo clippy -p logiflow-mac -p logiflow-ui -p logiflow-app --target x86_64-apple-darwin -- -D warnings
+          cargo test -p logiflow-core -p logiflow-mac
+      - name: Build arm64 + x64 → universal
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          cargo build --release -p logiflow-app --target aarch64-apple-darwin
+          cargo build --release -p logiflow-app --target x86_64-apple-darwin
+          mkdir -p ../mac-build
+          lipo -create -output ../mac-build/LogiFlowRs \
+            target/aarch64-apple-darwin/release/LogiFlowRs target/x86_64-apple-darwin/release/LogiFlowRs
+          lipo -info ../mac-build/LogiFlowRs
+          ls -la ../mac-build
+      - name: Package .app · dmg · zip (unsigned — ad-hoc only)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: rust/packaging/mac/make-app.sh "$PWD/mac-build/LogiFlowRs" "$VERSION" "$PWD/mac-out/out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LogiFlow-mac-${{ steps.version.outputs.version }}
+          path: mac-out/out/*
+          if-no-files-found: error
+          compression-level: 0
+      - name: Smoke — menu bar agent · Swift settings import · IPC · login item · second launch opens settings
+        run: rust/ci/mac-smoke.sh "$PWD/mac-out/app-under-test/LogiFlowRs.app" "$PWD/mac-shots"
+      - name: Settings window snapshots (same screens as Windows)
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          mkdir -p mac-shots/ui
+          "$PWD/mac-out/app-under-test/LogiFlowRs.app/Contents/MacOS/LogiFlowRs" --ui-snapshot="$PWD/mac-shots/ui" &
+          P=$!
+          for _ in $(seq 1 240); do kill -0 "$P" 2>/dev/null || break; sleep 0.5; done
+          if kill -0 "$P" 2>/dev/null; then kill "$P"; fi
+          ls -la mac-shots/ui | head -80
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LogiFlow-mac-snapshots-${{ steps.version.outputs.version }}
+          path: mac-shots/
+          if-no-files-found: warn

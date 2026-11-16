@@ -1,5 +1,7 @@
 //! LogiFlowRs.exe — C# `Program.Main` 과 같은 인자 분기. 인자 없으면 트레이.
 //! 러스트 판에서 더한 인자: `--ui`(설정 창 프로세스) · `--uninstall-cleanup` / `--uninstall-machine`(제거 정리).
+//! Mac(`LogiFlowRs.app/Contents/MacOS/LogiFlowRs`): 인자 없으면 메뉴 막대 상주 + 설정 창, `--autostart`(로그인 항목)는
+//! 상주만, `--ui` 설정 창, `--ui-snapshot` CI 캡처, `--version`.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(windows)]
@@ -81,7 +83,26 @@ fn main() {
     std::process::exit(code);
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 fn main() {
-    eprintln!("LogiFlowRs 는 Windows 판입니다(2단계에서 Mac·Linux 합침).");
+    let version = env!("CARGO_PKG_VERSION");
+    let arg = std::env::args().nth(1).unwrap_or_default();
+    let (name, value) = match arg.split_once('=') {
+        Some((n, v)) => (n.to_ascii_lowercase(), Some(v.to_string())),
+        None => (arg.to_ascii_lowercase(), None),
+    };
+    match name.as_str() {
+        "--version" | "-v" => println!("LogiFlow {}", version),
+        "--ui" => logiflow_ui::run(version),
+        "--ui-snapshot" => logiflow_ui::run_snapshot(version, value.as_deref().unwrap_or("snapshots")),
+        // 로그인 항목(LaunchAgent)으로 뜰 때 — 창 없이 메뉴 막대만.
+        "--autostart" => logiflow_mac::tray::run(false),
+        // 사람이 앱을 열었을 때(Finder 의 -psn_ 인자 등 모르는 인자 포함) — 메뉴 막대 + 설정 창.
+        _ => logiflow_mac::tray::run(true),
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn main() {
+    eprintln!("LogiFlowRs 는 Windows · Mac 판입니다. Linux 는 logiflow-rs(CLI)를 쓰세요.");
 }
