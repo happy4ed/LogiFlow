@@ -242,7 +242,8 @@ impl Canvas {
         for i in 0..self.screens.len().max(1) {
             widest = widest.max(tw(&format!("모니터 {}", i + 1), true));
         }
-        self.relayout(viewport, widest + 2.0 * TEXT_MX);
+        // +2: 모니터 칸 폭은 정수 픽셀로 잘리므로(0.16.2 첫 빌드에서 1px 모자라 「이 PC」만 보임) 여유를 둔다.
+        self.relayout(viewport, widest + 2.0 * TEXT_MX + 2.0);
         self.recompute_monitor_rects();
         let host = Rect::from_min_size(origin, viewport);
         let p = ui.painter().with_clip_rect(host.intersect(ui.clip_rect()));
