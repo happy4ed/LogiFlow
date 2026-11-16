@@ -341,9 +341,9 @@ main 결정 6) "지금 판 문제 3건은 러스트 판에서 고칠 것" 에 �
 | | Mac | Linux |
 |---|---|---|
 | HID | IOKit(`IOHIDManager` 열거 · `IOHIDDeviceSetReport` 쓰기 · 입력 리포트 콜백). Swift 판과 같은 경로 | hidraw 직접(C# 판과 같은 경로) |
-| 입력 | CGEventTap 듣기 전용(마우스 이동 · 끌기). 권한이 필요하면 안내 | 해당 없음(CLI) |
-| 메뉴 막대 / 트레이 | `tray-icon` 메뉴(채널으로 모두 전환 · 창 열기 · 기기 다시 찾기 · 종료) — Windows 트레이 메뉴와 같은 항목 | 해당 없음 |
-| 설정 창 | 같은 프로세스 안 egui 창(닫으면 숨김). Windows 는 지금처럼 별도 프로세스 + IPC | 없음(CLI) |
+| 입력 | NSEvent 전역·로컬 모니터(마우스 이동 · 끌기 델타) — Swift 판과 같은 경로, 권한 묻지 않음(11-16 구현 때 CGEventTap 에서 바꿈: 듣기 전용 탭은 입력 모니터링 권한을 물을 수 있어서) | 해당 없음(CLI) |
+| 메뉴 막대 / 트레이 | NSStatusItem(objc2 직접, 열 때마다 다시 만듦) — Windows 트레이 메뉴와 같은 항목(현재 채널 · … 모두 전환 · LogiFlow 창 열기 · 기기 다시 찾기 · 종료) | 해당 없음 |
+| 설정 창 | Windows 와 같은 구조 — 열 때만 뜨는 `--ui` 별도 프로세스, 상주 앱과는 Unix 소켓 IPC(같은 종류 번호 · 같은 상태 묶음). 11-16 구현 때 같은 프로세스 안 창에서 바꿈(공용 app.rs 를 그대로 쓰려고) | 없음(CLI) |
 | 자동 시작 | `~/Library/LaunchAgents/com.happy4ed.logiflow.rs.plist`(RunAtLoad) | 해당 없음 |
 | 클립보드 | 같은 프레임 · 같은 키(C# · Windows 러스트 판과 바이트 호환) | 해당 없음(C# 판도 없음) |
 | 설정 파일 | `~/Library/Application Support/LogiFlowRs/config.txt`(Windows 와 같은 key=value) · Swift `UserDefaults`(`com.happy4ed.logiflow` 의 `edgeEnabled` · `edgeBindings`)를 첫 실행 때 이어받음(화면 번호 → 화면 이름으로) | `$XDG_CACHE_HOME/logiflow-rs/devices.tsv`(C# 판 캐시 형식) |
