@@ -320,3 +320,49 @@ main 결정 6) "지금 판 문제 3건은 러스트 판에서 고칠 것" 에 �
 3. 클립보드 암호문구 — `clipSecretDpapi=<hex>`(DPAPI 사용자 범위). 보호 실패 시 암호문구를 아예 쓰지 않음(평문 대체 없음). C# 판 이어받기 때 옮겨 담고 C# 원본은 그대로.
 
 그 밖의 차이: 7절 1~8(승인) · 설정 창이 상태 갱신 때 맨 위로 돌아가지 않음 · 처음 설치도 자동 시작 꺼짐(시험판 한정) · 서비스 켜기 때 실행 중인 서비스를 먼저 멈추고 워커 사본을 새 판으로 덮어씀(지금 판은 사본이 잠겨 옛 판이 남을 수 있었음).
+
+## 13. 2단계 계획 — Mac · Linux (2026-11-16 착수)
+
+1단계 승인(회장님 11-16 원문 "ㅇㅇ 둘다 동작 겁나 잘되.") · Windows 기본 판 0.16.0 뒤. main 결정: Mac 은 Windows 와 **같은 설정 창·같은 3화면**(공용 egui), Swift 판의 단일 창·피커는 없앤다. Linux 는 같은 CLI 명령(list · switch N · N · --rescan · --debug · selftest · --version) + 공용 코어로 되는 것, GUI 는 공용 UI 로 거의 공짜일 때만(아니면 CLI 만).
+
+### 13.1 크레이트
+
+| 크레이트 | 하는 일 |
+|---|---|
+| `logiflow-core` | 그대로 공용(HID++ · 스캔 · 전환 가드 · 가장자리 판정 · 설정/캐시 형식 · 클립보드 암호 · glow 계산 · 테마) |
+| `logiflow-ui` | 설정 창. Windows 전용 호출(트레이 IPC · 메시지 상자 · 메뉴 · 입력 상자 · 방화벽 · 로그인 전 실행 · 이전 판 정리)을 `host` 경계 뒤로 옮기고 OS 별 구현. Mac 에 없는 묶음(로그인 전에도 실행 · 로그인 화면 테스트 · Windows 방화벽 · 기존 LogiFlow 정리)은 Mac 에서 숨김 |
+| `logiflow-win` | 지금 그대로 |
+| `logiflow-mac`(새) | IOKit HID 전송(IOHIDDevice 출력 리포트 · 입력 리포트 콜백 큐 · 타임아웃) · 화면 목록(CoreGraphics) · 가장자리 감시(CGEventTap 듣기 전용 · 마우스 이동 델타) · glow(투명 · 클릭 통과 창) · 메뉴 막대 아이콘(`tray-icon`) · 자동 시작(LaunchAgent plist) · 클립보드(arboard + 변경 횟수 폴링) · Swift 판 설정 이어받기 |
+| `logiflow-linux`(새) | hidraw 전송(open · poll · read/write) · `/sys/class/hidraw` 열거와 리포트 서술자 해석(C# `HidEnumerator` 이식) · CLI |
+| `app` | 실행 파일. Windows `LogiFlowRs.exe`(지금), Mac `LogiFlow`(.app 안), Linux `logiflow-rs` |
+
+### 13.2 OS 별
+
+| | Mac | Linux |
+|---|---|---|
+| HID | IOKit(`IOHIDManager` 열거 · `IOHIDDeviceSetReport` 쓰기 · 입력 리포트 콜백). Swift 판과 같은 경로 | hidraw 직접(C# 판과 같은 경로) |
+| 입력 | CGEventTap 듣기 전용(마우스 이동 · 끌기). 권한이 필요하면 안내 | 해당 없음(CLI) |
+| 메뉴 막대 / 트레이 | `tray-icon` 메뉴(채널으로 모두 전환 · 창 열기 · 기기 다시 찾기 · 종료) — Windows 트레이 메뉴와 같은 항목 | 해당 없음 |
+| 설정 창 | 같은 프로세스 안 egui 창(닫으면 숨김). Windows 는 지금처럼 별도 프로세스 + IPC | 없음(CLI) |
+| 자동 시작 | `~/Library/LaunchAgents/com.happy4ed.logiflow.rs.plist`(RunAtLoad) | 해당 없음 |
+| 클립보드 | 같은 프레임 · 같은 키(C# · Windows 러스트 판과 바이트 호환) | 해당 없음(C# 판도 없음) |
+| 설정 파일 | `~/Library/Application Support/LogiFlowRs/config.txt`(Windows 와 같은 key=value) · Swift `UserDefaults`(`com.happy4ed.logiflow` 의 `edgeEnabled` · `edgeBindings`)를 첫 실행 때 이어받음(화면 번호 → 화면 이름으로) | `$XDG_CACHE_HOME/logiflow-rs/devices.tsv`(C# 판 캐시 형식) |
+| 이름(나란히 설치) | `LogiFlowRs.app`(보이는 이름 LogiFlow) · 번들 id `com.happy4ed.logiflow.rs` | `/usr/local/bin/logiflow-rs` · `/etc/udev/rules.d/43-logiflow-rs.rules` |
+
+### 13.3 CI(`rust-unix.yml`, rust-port 만)
+
+1. macos-latest: fmt · clippy(aarch64 · x86_64) · 코어 시험 · 릴리스 빌드 2개 → `lipo` 유니버설 · .app 조립 · 실행 시험(기기 없이 뜨고 죽지 않음) · Swift 설정 이어받기 시험(러너에 `defaults write` 로 가짜 Swift 설정을 만들고 첫 실행 뒤 config.txt 확인) · 설정 창 화면 캡처 · 미서명 dmg · zip · SHA256SUMS.
+2. ubuntu-latest: fmt · clippy · 코어 시험 · x86_64 · aarch64 빌드 · `--version` · `selftest` · 기기 없을 때 `list` · tar.gz(실행 파일 · install.sh · uninstall.sh · udev 규칙) · SHA256SUMS.
+3. 릴리스는 내지 않음(main 이 초안에 올림).
+
+### 13.4 CI 로 확인 못 하는 것(실기만)
+
+Mac: 실제 로지텍 기기 HID 송수신 · 채널 전환 · CGEventTap 권한 창과 가장자리 밀기 · glow 모양 · 메뉴 막대 메뉴 조작 · LaunchAgent 로그인 자동 시작 · 미서명 dmg 를 Gatekeeper 가 막는지(우클릭 → 열기) · 실제 Swift 판 설정에서 이어받기 · Mac ↔ Windows 클립보드.
+Linux: 실제 기기 hidraw 송수신 · udev 규칙 권한(sudo 없이) · ARM 기기.
+
+### 13.5 순서
+
+1. `logiflow-linux` + CLI(가장 작고 C# 판과 1:1 비교가 쉬움) → CI.
+2. `logiflow-ui` 의 `host` 경계(Windows 동작 그대로, Windows CI 로 회귀 확인).
+3. `logiflow-mac` 전송 · 화면 · 가장자리 · 메뉴 막대 · 설정 창 · 자동 시작 · 클립보드 · Swift 이어받기 → CI · 화면 캡처 · 첫 사용 점검(Mac 화면에서 Windows 와 다른 곳).
+4. 포장(dmg · tar.gz) · 판 번호 0.16.0-rs.N 이어서.
