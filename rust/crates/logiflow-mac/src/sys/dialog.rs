@@ -88,9 +88,10 @@ const WORDS: &[(&str, &str)] = &[
         "Windows 에 로그인하면 LogiFlow 가 알림 영역에서 자동으로 시작합니다.",
         "Mac 에 로그인하면 LogiFlow 가 메뉴 막대에서 자동으로 시작합니다.",
     ),
+    ("LogiFlow 가 설치된 폴더 안 logs 폴더에 있습니다.", "기록 파일이 든 폴더를 Finder 에서 엽니다."),
     (
-        "LogiFlow 가 설치된 폴더 안 logs 폴더에 있습니다.",
-        "~/Library/Application Support/LogiFlowRs 안 logs 폴더에 있습니다.",
+        "시스템 설정을 따르거나 라이트·다크로 고정합니다.",
+        "자동은 macOS 설정을 따르고, 라이트·다크는 고정합니다.",
     ),
     ("폴더 열기", "Finder 에서 보기"),
     ("트레이 메뉴", "메뉴 막대 메뉴"),

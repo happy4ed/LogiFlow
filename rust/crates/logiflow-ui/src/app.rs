@@ -681,34 +681,20 @@ impl SettingsApp {
             self.set_layout(cfg, att);
         }
         // 기기를 못 찾아 채널 상자가 없을 때 — 캔버스 안에 이유와 할 일(0.16.1 첫 사용 점검: 모니터만 보여 막힘).
+        // 「다시 찾기」는 아래 「기기」 묶음 하나만 둔다(같은 일의 진입점 하나 — 2차 점검).
         if channels.is_empty() {
             let msg = if scanning {
                 "기기를 찾는 중입니다…"
             } else {
-                "로지텍 마우스·키보드를 찾지 못해 붙일 채널 상자가 없습니다. 기기를 켜거나 리시버를 꽂은 뒤 「다시 찾기」를 누르세요."
+                "로지텍 마우스·키보드를 찾지 못해 붙일 채널 상자가 없습니다. 기기를 켜거나 리시버를 꽂은 뒤 아래 「기기」의 「다시 찾기」를 누르세요."
             };
-            let mw = (w - 48.0).min(460.0);
+            let mw = (w - 64.0).min(440.0);
             let mh = pc.wrap_h(msg, DESC, false, mw);
-            let bw = pc.btn_w("다시 찾기", Some(Icon::Refresh));
-            let bh = pc.btn_h();
-            let total = mh + 10.0 + bh;
-            let my = y + canvas_h - total - 18.0;
-            let mx = x0 + (w - mw) / 2.0;
-            pc.fill(mx - 12.0, my - 10.0, mw + 24.0, total + 20.0, p.section);
-            pc.wrap(mx, my, mw, msg, DESC, false, p.muted);
-            if pc.button(
-                "rescan0",
-                x0 + (w - bw) / 2.0,
-                my + mh + 10.0,
-                bw,
-                bh,
-                "다시 찾기",
-                Some(Icon::Refresh),
-                Variant::Default,
-                !scanning,
-            ) {
-                self.rescan();
-            }
+            let (cw_, ch_) = (mw + 32.0, mh + 24.0);
+            let cx_ = x0 + (w - cw_) / 2.0;
+            let cy_ = y + canvas_h - ch_ - 20.0;
+            pc.card(cx_, cy_, cw_, ch_);
+            pc.wrap(cx_ + 16.0, cy_ + 12.0, mw, msg, DESC, false, p.muted);
         }
         y += canvas_h + 8.0;
         // 캔버스 바로 아래 한 줄: 왼쪽 붙이기·떼기 방법(상단 설명에 묻혀 있던 것을 캔버스 옆으로 — 0.16.1 첫 사용 점검),
@@ -717,9 +703,13 @@ impl SettingsApp {
         let bh = pc.btn_h();
         let undo_key = pc.interactive && ctx.input(|i| i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z));
         let uw = if self.layout_undo.is_empty() { 0.0 } else { pc.btn_w("되돌리기", None) };
-        let hint = "상자를 끌어 모니터 가장자리에 붙이고, 모니터에서 멀리 끌어 놓으면 뗍니다.";
+        let hint = if channels.is_empty() {
+            ""
+        } else {
+            "상자를 끌어 모니터 가장자리에 붙이고, 모니터에서 멀리 끌어 놓으면 뗍니다."
+        };
         let hint_w = (w - uw - if uw > 0.0 { 16.0 } else { 0.0 }).max(120.0);
-        let hint_h = pc.wrap_h(hint, DESC, false, hint_w);
+        let hint_h = if hint.is_empty() { 0.0 } else { pc.wrap_h(hint, DESC, false, hint_w) };
         let row_h = hint_h.max(if uw > 0.0 { bh } else { 0.0 });
         pc.wrap(x0, y + (row_h - hint_h) / 2.0, hint_w, hint, DESC, false, p.muted);
         if uw > 0.0 {
@@ -744,7 +734,7 @@ impl SettingsApp {
             w,
             Line::new(
                 "사용",
-                "붙여 둔 가장자리로 커서를 밀면 마우스·키보드가 모두 그 채널로 넘어갑니다. 끄면 버튼이나 트레이 메뉴로 직접 넘길 때만 넘어갑니다.",
+                "붙여 둔 가장자리로 커서를 밀면 마우스·키보드가 모두 그 채널로 넘어갑니다. 끄면 아래 「모두 전환」이나 트레이 메뉴로 직접 넘길 때만 넘어갑니다.",
             ),
             cfg.edge_switch_enabled,
         );
@@ -864,11 +854,9 @@ impl SettingsApp {
         let rw = pc.btn_w(rescan, Some(Icon::Refresh));
         let lh = pc.line_h(LAB, true);
         let others = shown.len().saturating_sub(sw.len());
-        let head = if self.detail && others > 0 {
-            format!("기기 {}개 · 전환 안 되는 기기 {}개", sw.len(), others)
-        } else {
-            format!("기기 {}개", sw.len())
-        };
+        // 머리는 전환되는 기기 수만(「자세히 보기」에서 리시버 본체가 늘어도 고장처럼 읽히지 않게 — 2차 점검).
+        let _ = others;
+        let head = format!("기기 {}개", sw.len());
         // 묶음 머리 모양은 다른 묶음(「가장자리 자동 전환」 등)과 같게 — 0.16.1 첫 사용 점검.
         let sh = pc.line_h(8.0, true);
         let head_w = pc.text(x0, y + (bh - sh) / 2.0, &head, 8.0, true, p.muted);
