@@ -17,11 +17,22 @@ pub const FIREWALL_RULE: &str = "LogiFlowRs Clipboard";
 /// 트레이 IPC 창 클래스(설정 창이 찾음).
 pub const TRAY_IPC_CLASS: &str = "LogiFlowRs.TrayIpc";
 
-/// C# 판(감지·이어받기 전용, 쓰지 않음).
+/// C# 판(감지·이어받기·정리 전용). 사용자 설정 폴더 `%APPDATA%\LogiFlow` 는 읽기만 하고 지우지 않는다.
 pub mod legacy {
     pub const APP: &str = "LogiFlow";
+    pub const EXE_NAME: &str = "LogiFlow.exe";
     pub const MUTEX_NAME: &str = "LogiFlow-A2E1C4D6-8B3F-4A91-9C72-1E5D7F0A2B34";
     pub const SERVICE_NAME: &str = "LogiFlowLogonSwitch";
+    pub const TASKS: [&str; 3] = ["LogiFlow-PreLogon", "LogiFlow-DesktopProbe", "LogiFlow-Tray"];
+    pub const RUN_VALUE: &str = "LogiFlow";
+    pub const FIREWALL_RULE: &str = "LogiFlow Clipboard";
+    /// C# 설치 파일(Inno Setup, 사용자 범위)의 제거 정보 키(HKCU).
+    pub const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{B1F3C2A4-7D6E-4C58-9A21-3F0E8C4D5B60}_is1";
+}
+
+/// C# 판 머신 공유 폴더(`%ProgramData%\LogiFlow` — 워커 사본·logon-edges·로그). 정리 때 지운다.
+pub fn legacy_machine_dir() -> PathBuf {
+    env_dir("ProgramData", r"C:\ProgramData").join(legacy::APP)
 }
 
 fn env_dir(var: &str, fallback: &str) -> PathBuf {

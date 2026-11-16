@@ -1,6 +1,6 @@
 # LogiFlow 0.16.0-rs.4 — Windows 러스트 판(작은 수정)
 
-rs.3 회장님 PC 첫 실기 통과(11-16, 원문 "오 동작 잘된다. 용량도 적고") 뒤의 작은 수정판. 아래 두 가지만 바꿨고 그 밖의 동작·화면은 rs.3 그대로다.
+rs.3 회장님 PC 첫 실기 통과(11-16, 원문 "오 동작 잘된다. 용량도 적고") 뒤의 작은 수정판. 아래만 바꿨고 그 밖의 동작·화면은 rs.3 그대로다.
 
 ## 받을 파일
 
@@ -9,6 +9,15 @@ rs.3 회장님 PC 첫 실기 통과(11-16, 원문 "오 동작 잘된다. 용량�
 | `LogiFlowRs-v0.16.0-rs.4-setup.exe` | 설치 파일(x64·ARM64 한 파일) |
 | `LogiFlowRs-v0.16.0-rs.4-win-x64-arm64.zip` | 실행 파일만(x64·arm64 각 1개) |
 | `LogiFlowRs-v0.16.0-rs.4-SHA256SUMS.txt` | 해시 |
+
+## 0. 기존 LogiFlow(C# 판)를 이 앱에서 정리 — 회장님 PC 사고(11-16)
+
+- 증상: 설정 → 앱에서 C# LogiFlow 를 지운 뒤 「로그인 전에도 실행」을 누르면 「기존 LogiFlow 에서 먼저 끈 뒤 다시 켜 주세요」가 떠서 더 진행할 수 없었다(회장님 원문 "이미 프로그램을 지웠는데 ㅠㅠ" · "그냥 기존거 지우는건러스트 판에서도 되게 안되나?").
+- 원인: C# 설치 파일은 「로그온 전에도 실행」을 되돌리지 않는다. 서비스 `LogiFlowLogonSwitch` 가 워커 사본(`%ProgramData%\LogiFlow\worker\LogiFlow.exe`)으로 돌아서 앱을 지워도 남는다.
+- 고침: 「기존 LogiFlow 정리」(관리자 승인 한 번). C# 앱이 아직 있으면 그 제거 프로그램을 조용히 실행 → 로그인 자동 시작 Run 값 → (관리자) 실행 중인 C# 트레이(뮤텍스로 확인)·워커 종료, 서비스 중지·삭제, 예약 작업 `LogiFlow-PreLogon`·`LogiFlow-DesktopProbe`·`LogiFlow-Tray`, `%ProgramData%\LogiFlow`, 방화벽 규칙 `LogiFlow Clipboard`. 사용자 설정 `%APPDATA%\LogiFlow` 는 지우지 않는다. 단계마다 기록(`%ProgramData%\LogiFlowRs\desktop-probe.log` · 진단 기록).
+- 어디서: ① 「로그인 전에도 실행」을 켤 때 이전 판이 남아 있으면 확인 상자의 「기존 LogiFlow 정리」 단추 하나 → 정리하고 같은 관리자 승인으로 이어서 켬. ② 전환 관리 「가장자리 자동 전환」 카드(이전 판 때문에 가장자리 감시를 멈췄을 때). ③ 진단 화면(남은 것이 있을 때만 「기존 LogiFlow(이전 판)」 카드). 트레이도 처음 한 번 풍선으로 알림.
+- CLI: `LogiFlowRs.exe --cleanup-legacy`(관리자로 실행할 때 전부) · `--cleanup-legacy-machine`(설정 창이 UAC 로 부름).
+- CI: 실제 C# 0.15.0 을 설치하고 서비스·예약 작업 3개·`%ProgramData%\LogiFlow`(도는 워커 포함)·방화벽 규칙·Run 값을 만든 뒤 정리 → 전부 사라지고 `%APPDATA%\LogiFlow\config.txt` 는 내용 그대로인지 확인(`rust/ci/legacy-cleanup.ps1`).
 
 ## 1. 포터블 zip 에 로그 파일이 섞여 나가던 것
 
@@ -27,6 +36,8 @@ rs.3 회장님 PC 첫 실기 통과(11-16, 원문 "오 동작 잘된다. 용량�
 C# 판과 주고받는 형식(클립보드 프레임 · `config.txt` · `devices.txt`)은 바뀌지 않았다.
 
 ## 실기 확인 대기
+
+- 「기존 LogiFlow 정리」 — 회장님 PC 의 남은 C# 서비스로(설정 창의 UAC 경로, CI 는 관리자 러너에서 CLI 로만 확인)
 
 - 네트워크 이름 표시(회장님 PC 의 실제 어댑터 이름·순서)
 - 트레이 메뉴 「…으로 모두 전환」 동작(rs.3 과 같은 경로)

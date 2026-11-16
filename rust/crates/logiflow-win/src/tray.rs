@@ -431,7 +431,19 @@ fn reconfigure_watcher() {
     // B안: 서비스가 켜지면 바탕화면 전환은 서비스 워커가 전담(트레이는 감시 안 함).
     if cfg.tray_should_watch(edge_watcher::has_attachments(), sw) {
         if legacy::conflict() {
-            log.log("기존 LogiFlow(C# 판) 실행 중 — 가장자리 감시 끔(중복 전환 방지)");
+            log.log("기존 LogiFlow(C# 판)가 남아 있음 — 가장자리 감시 끔(중복 전환 방지)");
+            // 한 번만 알림 — 설정 창 「전환 관리」·「진단」의 「기존 LogiFlow 정리」로 지울 수 있다.
+            static TOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if !TOLD.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                with(|t| {
+                    notify::balloon(
+                        t.hwnd,
+                        "LogiFlow",
+                        "기존 LogiFlow(이전 판)가 남아 있어 가장자리 자동 전환을 멈춰 두었습니다. 설정 창에서 「기존 LogiFlow 정리」를 누르세요.",
+                        true,
+                    )
+                });
+            }
         } else {
             edge_watcher::start();
         }

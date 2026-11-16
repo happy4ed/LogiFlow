@@ -65,6 +65,13 @@ fn main() {
         }
         // 러스트 판: 제거 정리(지금 판과 다른 점 — 서비스·워커 사본까지 지움).
         "--uninstall-cleanup" => prelogon::uninstall_cleanup(),
+        // 기존 LogiFlow(C# 판) 정리 — 사용자 쪽 + 머신 쪽(관리자로 실행할 때·CI), 머신 쪽만(설정 창이 UAC 로 부름).
+        "--cleanup-legacy" => {
+            let log = logiflow_core::log::DiagLogger::new(&logiflow_win::util::exe_dir(), true);
+            logiflow_win::legacy::cleanup_user(&log);
+            logiflow_win::legacy::cleanup_machine()
+        }
+        "--cleanup-legacy-machine" => logiflow_win::legacy::cleanup_machine(),
         "--uninstall-machine" => prelogon::uninstall_machine(),
         _ => {
             tray::run();

@@ -53,6 +53,8 @@ struct Modal {
     finished: Arc<Mutex<Option<(String, bool)>>>,
     /// 끝난 뒤 설정에 반영할 「로그인 전에도 실행」 값.
     pre_logon_after: Arc<Mutex<Option<bool>>>,
+    /// 기존 LogiFlow 정리를 했으면 닫을 때 남은 것을 다시 보고 트레이 감시를 다시 구성한다.
+    after_cleanup: bool,
     started: Instant,
 }
 
@@ -70,6 +72,8 @@ pub struct SettingsApp {
     /// 방화벽 규칙 · 로그인 화면 테스트 작업이 있는지(None = 확인 중). 백그라운드로 조회.
     firewall_on: Arc<Mutex<Option<bool>>>,
     probe_installed: Arc<Mutex<Option<bool>>>,
+    /// 기존 LogiFlow(C# 판)의 남은 것(None = 확인 중).
+    legacy: Arc<Mutex<Option<legacy::Leftovers>>>,
     /// 이 PC 주소(호스트 이름 조회라 느릴 수 있어 백그라운드 1회).
     local_ips: Arc<Mutex<Option<Vec<clipboard::LocalAddr>>>>,
     canvas: Canvas,
@@ -115,6 +119,15 @@ fn refresh_ips(slot: &Arc<Mutex<Option<Vec<clipboard::LocalAddr>>>>) {
     });
 }
 
+/// 기존 LogiFlow 남은 것 다시 보기(서비스 관리자·레지스트리 조회라 백그라운드).
+fn refresh_legacy(slot: &Arc<Mutex<Option<legacy::Leftovers>>>) {
+    let slot = slot.clone();
+    std::thread::spawn(move || {
+        let v = legacy::leftovers();
+        *slot.lock().unwrap() = Some(v);
+    });
+}
+
 /// 백그라운드 상태 조회. 조회하는 동안은 옛 값을 그대로 보여 준다(처음에만 「확인 중…」).
 fn spawn_check(slot: &Arc<Mutex<Option<bool>>>, f: impl FnOnce() -> bool + Send + 'static) {
     let slot = slot.clone();
@@ -142,6 +155,8 @@ impl SettingsApp {
         spawn_check(&probe_installed, probe::is_installed);
         let local_ips = Arc::new(Mutex::new(None));
         refresh_ips(&local_ips);
+        let legacy_state = Arc::new(Mutex::new(None));
+        refresh_legacy(&legacy_state);
         SettingsApp {
             shared,
             tray,
@@ -155,6 +170,7 @@ impl SettingsApp {
             firewall_on,
             probe_installed,
             local_ips,
+            legacy: legacy_state,
             canvas: Canvas::default(),
             layout_undo: Vec::new(),
             copied: None,
@@ -388,6 +404,7 @@ impl eframe::App for SettingsApp {
             if nav_button(&sb, &format!("nav{}", i), 12.0, y, 158.0, nav_h, t, *ic, self.page == i) && self.page != i {
                 self.page = i;
                 self.offset = 0.0; // C#: 화면 바꾸면 맨 위로
+                refresh_legacy(&self.legacy);
                 if i == 1 {
                     refresh_ips(&self.local_ips);
                     let port = cfg.clip_port;
@@ -671,6 +688,28 @@ impl SettingsApp {
             self.apply(|c| c.edge_switch_enabled = !c.edge_switch_enabled);
         }
         y += h;
+        // 이전 판이 남아 트레이가 가장자리 감시를 멈춘 상태 — 여기서 바로 정리.
+        let legacy_now = self.legacy.lock().unwrap().clone();
+        if let Some(l) = legacy_now.filter(|l| l.conflicts()) {
+            divider(pc, x0, y, w);
+            let (hit, h) = buttons_row(
+                pc,
+                "legacy1",
+                x0,
+                y,
+                w,
+                Line::new(
+                    "기존 LogiFlow 가 남아 있음",
+                    format!("남은 것: {}. 두 앱이 함께 넘기지 않도록 가장자리 자동 전환을 멈춰 두었습니다.", l.describe()),
+                )
+                .status("멈춤 — 정리하면 다시 켜집니다", p.warn),
+                &[("기존 LogiFlow 정리", None, Variant::Default)],
+            );
+            if hit.is_some() {
+                self.start_legacy_cleanup(cfg, false);
+            }
+            y += h;
+        }
         divider(pc, x0, y, w);
         let dwell_lab = dwell_text(cfg.dwell_ms);
         let (hit, h) = buttons_row(
@@ -1344,6 +1383,84 @@ impl SettingsApp {
         y + 28.0
     }
 
+    /// 「기존 LogiFlow 정리」 — 확인 상자 → 진행 창(사용자 쪽 정리 → UAC 한 번으로 서비스·예약 작업·남은 파일).
+    /// then_enable_prelogon 이면 같은 UAC 로 「로그인 전에도 실행」까지 켠다(설치 단계가 남은 서비스를 먼저 지움).
+    fn start_legacy_cleanup(&mut self, cfg: &AppConfig, then_enable_prelogon: bool) {
+        let found = self.legacy.lock().unwrap().clone().unwrap_or_default();
+        let what = if found.any() { found.describe() } else { "남은 흔적".to_string() };
+        let content = format!(
+            "남은 것: {}.\r\n\r\n정리하면 이전 판의 앱·「로그온 전에도 실행」 서비스·예약 작업·남은 파일을 지웁니다. 이전 판의 설정 파일(%APPDATA%\\LogiFlow)은 지우지 않습니다. 관리자 승인이 한 번 필요합니다.{}",
+            what,
+            if then_enable_prelogon {
+                "\r\n정리한 뒤 이어서 「로그인 전에도 실행」을 켭니다."
+            } else {
+                ""
+            }
+        );
+        let pick = logiflow_win::util::task_dialog(
+            self.owner(),
+            "LogiFlow",
+            "기존 LogiFlow(이전 판)가 이 PC 에 남아 있습니다",
+            &content,
+            &[(1001, "기존 LogiFlow 정리")],
+        );
+        if pick != 1001 {
+            return;
+        }
+        let mut modal = Modal::new(if then_enable_prelogon {
+            "기존 LogiFlow 정리 후 로그인 전에도 실행 켜기"
+        } else {
+            "기존 LogiFlow 정리"
+        });
+        modal.after_cleanup = true;
+        let (step, fin, after) = (modal.step.clone(), modal.finished.clone(), modal.pre_logon_after.clone());
+        let cfg2 = cfg.clone();
+        std::thread::spawn(move || {
+            let log = logiflow_core::log::DiagLogger::new(&logiflow_win::util::exe_dir(), true);
+            *step.lock().unwrap() = "이전 판 앱을 지우는 중…".into();
+            let mut lines = legacy::cleanup_user(&log);
+            if then_enable_prelogon {
+                *step.lock().unwrap() = "채널 배치 저장 중…".into();
+                tray::write_logon_edges(&cfg2);
+                *step.lock().unwrap() = "관리자 승인을 요청하는 중…\r\n승인 창이 뜨면 「예」를 눌러 주세요.".into();
+                // 설치 단계(--install-prelogon)가 같은 UAC 로 이전 판 서비스·작업·파일을 먼저 지운다.
+                let ok = prelogon::request_enable(cfg2.my_host);
+                *after.lock().unwrap() = Some(ok);
+                let left = legacy::leftovers();
+                lines.push(if left.conflicts() {
+                    "이전 판 서비스가 아직 남아 있음".into()
+                } else {
+                    "이전 판 서비스·남은 파일 정리 완료".into()
+                });
+                *fin.lock().unwrap() = Some((
+                    if ok && !left.conflicts() {
+                        "기존 LogiFlow 를 정리하고 「로그인 전에도 실행」을 켰습니다.".to_string()
+                    } else if ok {
+                        "「로그인 전에도 실행」은 켰지만 이전 판의 일부가 남았습니다. 「진단」에서 다시 정리해 주세요.".to_string()
+                    } else {
+                        "켜지 못했습니다(취소했거나 관리자 승인이 막혔습니다).".to_string()
+                    },
+                    !ok,
+                ));
+            } else {
+                *step.lock().unwrap() = "관리자 승인을 요청하는 중…\r\n승인 창이 뜨면 「예」를 눌러 주세요.".into();
+                let (ok, more) = legacy::request_cleanup_machine_only();
+                lines.extend(more);
+                *fin.lock().unwrap() = Some((
+                    if ok {
+                        "기존 LogiFlow 를 정리했습니다. 이제 가장자리 자동 전환이 다시 켜집니다.".to_string()
+                    } else {
+                        "일부를 정리하지 못했습니다(취소했거나 관리자 승인이 막혔습니다). 남은 앱은 Windows 설정 → 앱에서 「LogiFlow」를 지울 수 있습니다."
+                            .to_string()
+                    },
+                    !ok,
+                ));
+            }
+            log.log(&format!("[기존 LogiFlow 정리] 결과: {}", lines.join(" / ")));
+        });
+        self.modal = Some(modal);
+    }
+
     /// 「Windows 방화벽」 줄. sharing_off = 공유를 끈 상태(규칙이 남아 있을 때만 불림). 줄 높이.
     fn firewall_row(&mut self, pc: &Pc<'_>, cx: f32, y: f32, w: f32, cfg: &AppConfig, sharing_off: bool) -> f32 {
         let p = pc.pal;
@@ -1395,13 +1512,11 @@ impl SettingsApp {
                 );
                 return;
             }
-            // 시험판 한정: C# 판 서비스와 함께 돌면 로그인 화면에서 두 번 전환된다.
-            if legacy::csharp_service_exists() {
-                self.msg(
-                    "기존 LogiFlow(C# 판)의 「로그온 전에도 실행」이 켜져 있습니다.\r\n두 판이 함께 전환하지 않도록, 기존 LogiFlow 에서 먼저 끈 뒤 다시 켜 주세요.",
-                    "로그인 전에도 실행",
-                    MB_OK | MB_ICONINFORMATION,
-                );
+            // 이전 판(C#)이 남아 있으면 두 판이 함께 전환한다 — 이 앱에서 바로 정리하고 이어서 켠다.
+            let l = legacy::leftovers();
+            if l.conflicts() || l.installed {
+                *self.legacy.lock().unwrap() = Some(l);
+                self.start_legacy_cleanup(cfg, true);
                 return;
             }
             let modal = Modal::new("로그인 전에도 실행 — 켜는 중");
@@ -1522,7 +1637,12 @@ impl SettingsApp {
         );
         if close {
             let after = *self.modal.as_ref().unwrap().pre_logon_after.lock().unwrap();
+            let cleaned = self.modal.as_ref().unwrap().after_cleanup;
             self.modal = None;
+            if cleaned {
+                refresh_legacy(&self.legacy);
+                self.apply(|_| {}); // 트레이가 설정을 다시 적용하며 가장자리 감시를 다시 켠다
+            }
             if let Some(v) = after {
                 *self.prelogon_installed.lock().unwrap() = v;
                 self.apply(|c| c.pre_logon = v);
@@ -1627,6 +1747,33 @@ impl SettingsApp {
             "진단",
             "잘 안 될 때 기록을 남겨 원인을 찾고, 로그인 화면 전환이 이 PC 에서 되는지 미리 알아봅니다.",
         );
+
+        // 기존 LogiFlow(이전 판)가 남아 있을 때만 — 정리 단추.
+        let legacy_now = self.legacy.lock().unwrap().clone();
+        if let Some(l) = legacy_now.filter(|l| l.any()) {
+            y = section(pc, y, "기존 LogiFlow(이전 판)");
+            let slot = pc.card_begin();
+            let top = y;
+            let (hit, h) = buttons_row(
+                pc,
+                "legacy2",
+                x0,
+                y,
+                w,
+                Line::new(
+                    "남아 있는 이전 판",
+                    "정리하면 이전 판의 앱·「로그온 전에도 실행」 서비스·예약 작업·남은 파일을 지웁니다. 이전 판의 설정 파일은 남깁니다. 관리자 승인이 한 번 필요할 수 있습니다.",
+                )
+                .status(format!("남은 것: {}", l.describe()), p.warn),
+                &[("기존 LogiFlow 정리", None, Variant::Default)],
+            );
+            if hit.is_some() {
+                self.start_legacy_cleanup(cfg, false);
+            }
+            y += h;
+            pc.card_end(slot, x0, top, w, y - top);
+            y += 18.0;
+        }
 
         // 기록 — 남기기 설정과 파일 다루기를 한곳에.
         y = section(pc, y, "기록");
@@ -1920,6 +2067,7 @@ impl Modal {
             step: Arc::new(Mutex::new("준비 중…".into())),
             finished: Arc::new(Mutex::new(None)),
             pre_logon_after: Arc::new(Mutex::new(None)),
+            after_cleanup: false,
             started: Instant::now(),
         }
     }

@@ -49,6 +49,11 @@ fn copy_worker_to_machine() -> PathBuf {
 
 /// 상승된 인스턴스(`--install-prelogon=N`).
 pub fn do_install(_my_host: i32) -> i32 {
+    // 기존 LogiFlow(C# 판) 서비스·워커가 남아 있으면 같은 UAC 로 먼저 정리(두 판이 함께 전환하지 않게).
+    let l = crate::legacy::leftovers();
+    if l.service || l.machine_dir || l.tray_running {
+        crate::legacy::cleanup_machine();
+    }
     // 서비스가 돌고 있으면 먼저 멈춰 워커 사본을 새 판으로 덮어쓸 수 있게 한다.
     if service_ctl::exists() {
         service_ctl::stop_wait();

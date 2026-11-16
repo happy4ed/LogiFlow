@@ -112,3 +112,45 @@ pub fn tick_ms() -> u64 {
     static START: OnceLock<Instant> = OnceLock::new();
     START.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
+
+/// 단추 이름을 정할 수 있는 Windows 기본 확인 상자(TaskDialog). buttons = (번호, 이름). 취소 단추를 함께 둔다.
+/// 고른 번호, 취소·닫기면 0.
+pub fn task_dialog(owner: Option<HWND>, title: &str, main: &str, content: &str, buttons: &[(i32, &str)]) -> i32 {
+    use windows::Win32::UI::Controls::{
+        TaskDialogIndirect, TASKDIALOGCONFIG, TASKDIALOG_BUTTON, TDCBF_CANCEL_BUTTON, TDF_ALLOW_DIALOG_CANCELLATION, TDF_POSITION_RELATIVE_TO_WINDOW,
+        TD_WARNING_ICON,
+    };
+    let t = HSTRING::from(title);
+    let m = HSTRING::from(main);
+    let c = HSTRING::from(content);
+    let labels: Vec<HSTRING> = buttons.iter().map(|(_, l)| HSTRING::from(*l)).collect();
+    let btns: Vec<TASKDIALOG_BUTTON> = buttons
+        .iter()
+        .zip(&labels)
+        .map(|((id, _), l)| TASKDIALOG_BUTTON {
+            nButtonID: *id,
+            pszButtonText: PCWSTR(l.as_ptr()),
+        })
+        .collect();
+    let mut cfg = TASKDIALOGCONFIG {
+        cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
+        hwndParent: owner.unwrap_or_default(),
+        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW,
+        dwCommonButtons: TDCBF_CANCEL_BUTTON,
+        pszWindowTitle: PCWSTR(t.as_ptr()),
+        pszMainInstruction: PCWSTR(m.as_ptr()),
+        pszContent: PCWSTR(c.as_ptr()),
+        cButtons: btns.len() as u32,
+        pButtons: btns.as_ptr(),
+        nDefaultButton: buttons.first().map(|b| b.0).unwrap_or(0),
+        ..Default::default()
+    };
+    cfg.Anonymous1.pszMainIcon = TD_WARNING_ICON;
+    let mut pressed = 0i32;
+    let ok = unsafe { TaskDialogIndirect(&cfg, Some(&mut pressed), None, None) }.is_ok();
+    if ok && buttons.iter().any(|b| b.0 == pressed) {
+        pressed
+    } else {
+        0
+    }
+}

@@ -74,11 +74,20 @@ pub fn install(exe: &Path) -> i32 {
 
 /// 중지 + 삭제(관리자). 0 성공(또는 이미 없음). 중지 완료를 최대 10초 기다린다(워커 사본 지우기 전).
 pub fn uninstall() -> i32 {
+    uninstall_named(SERVICE_NAME)
+}
+
+/// C# 판 서비스 중지 + 삭제(관리자, 기존 LogiFlow 정리).
+pub fn uninstall_legacy() -> i32 {
+    uninstall_named(legacy::SERVICE_NAME)
+}
+
+fn uninstall_named(name: &str) -> i32 {
     let m = match ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT) {
         Ok(m) => m,
         Err(e) => return code(&e).max(5),
     };
-    let svc = match m.open_service(SERVICE_NAME, ServiceAccess::QUERY_STATUS | ServiceAccess::STOP | ServiceAccess::DELETE) {
+    let svc = match m.open_service(name, ServiceAccess::QUERY_STATUS | ServiceAccess::STOP | ServiceAccess::DELETE) {
         Ok(s) => s,
         Err(_) => return 0, // 이미 없음
     };

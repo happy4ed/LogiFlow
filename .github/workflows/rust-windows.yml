@@ -92,6 +92,12 @@ jobs:
           Copy-Item rust/dist/x64/LogiFlowRs.exe $run/
           ./rust/ci/smoke.ps1 -Exe "$run/LogiFlowRs.exe"
 
+      - name: Legacy (C#) cleanup — real 0.15.0 install + simulated pre-logon leftovers
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./rust/ci/legacy-cleanup.ps1 -Exe "$env:RUNNER_TEMP/lf-run/LogiFlowRs.exe"
+
       - name: Settings window snapshots (3 screens × light/dark)
         shell: pwsh
         continue-on-error: true
