@@ -3,7 +3,7 @@
 ; 이미 깔린 rs 판은 그 자리에서 업그레이드된다. x64·arm64 실행 파일을 한 설치 파일에 담아 PC 에 맞는 쪽을 깐다.
 ; 이전 판(C# LogiFlow, AppId {B1F3C2A4-…})이 깔려 있으면 설치 전에 그 제거 프로그램을 조용히 실행한다(사용자 범위라 관리자 승인 없음).
 ; 이전 판 설정(%APPDATA%\LogiFlow)은 이전 판 제거 프로그램도 지우지 않으며, 이 앱이 처음 실행될 때 이어받는다.
-; 이전 판이 남긴 「로그온 전에도 실행」 서비스(관리자 범위)는 앱의 「기존 LogiFlow 정리」가 지운다.
+; 이전 판이 남긴 「로그온 전에도 실행」 서비스(관리자 범위)는 앱의 「이전 판 지우기」(0.16.1 까지 「기존 LogiFlow 정리」)가 지운다.
 ; 제거 때 서비스·워커 사본·예약 작업·방화벽 규칙까지 정리한다(--uninstall-cleanup, 필요할 때만 UAC).
 #ifndef AppVersion
   #define AppVersion "0.16.0"
@@ -128,7 +128,7 @@ begin
   Result := MemoDirInfo;
   if MemoTasksInfo <> '' then Result := Result + NewLine + NewLine + MemoTasksInfo;
   if LegacyFound then
-    Result := Result + NewLine + NewLine + '기존 LogiFlow(이전 판)를 지우고 이 판으로 바꿉니다. 설정은 처음 실행할 때 이어받습니다.';
+    Result := Result + NewLine + NewLine + '이전 판(0.15.x)을 지우고 이 판으로 바꿉니다. 설정은 처음 실행할 때 이어받습니다.';
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -142,7 +142,7 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if (CurStep = ssDone) and LegacyLeft then
-    SuppressibleMsgBox('기존 LogiFlow(이전 판, 버전 0.15.x)를 자동으로 지우지 못했습니다.' + #13#10 +
+    SuppressibleMsgBox('이전 판(버전 0.15.x)을 자동으로 지우지 못했습니다.' + #13#10 +
       'Windows 설정 → 앱 → 설치된 앱에서 버전이 0.15.x 인 「LogiFlow」를 찾아 제거해 주세요.', mbInformation, MB_OK, IDOK);
 end;
 

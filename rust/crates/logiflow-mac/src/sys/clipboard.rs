@@ -475,14 +475,14 @@ pub fn local_addresses() -> Vec<LocalAddr> {
 pub fn test_connect(host: &str, port: i32) -> (bool, String) {
     let host = clip::norm(host);
     if host.is_empty() {
-        return (false, "상대 PC 주소가 비어 있습니다.".into());
+        return (false, "상대 컴퓨터 주소가 비어 있습니다.".into());
     }
     let r: String = match connect(&host, port) {
-        Ok(_) => return (true, format!("상대 PC({}, 포트 {})에 연결됩니다.", host, port)),
+        Ok(_) => return (true, format!("상대 컴퓨터({}, 포트 {})에 연결됩니다.", host, port)),
         Err(SendErr::Timeout) => {
-            "상대 PC 에 연결하지 못했습니다(시간 초과).\n상대 PC 가 켜져 있는지, 주소가 맞는지, 상대 PC 의 방화벽이 허용됐는지 확인하세요.".into()
+            "상대 컴퓨터에 연결하지 못했습니다(시간 초과).\n상대 컴퓨터가 켜져 있는지, 주소가 맞는지, 상대 컴퓨터의 방화벽이 허용됐는지 확인하세요.".into()
         }
-        Err(SendErr::Other(e)) => format!("상대 PC 에 연결하지 못했습니다.\n({})", e),
+        Err(SendErr::Other(e)) => format!("상대 컴퓨터에 연결하지 못했습니다.\n({})", e),
     };
     (false, r)
 }
@@ -490,7 +490,7 @@ pub fn test_connect(host: &str, port: i32) -> (bool, String) {
 /// 상대에게 시험 글을 보낸다(종단 확인). running = 상주 앱 쪽 공유가 켜져 있는지. (보냄, 안내 글).
 pub fn send_test(running: bool, cfg: &AppConfig) -> (bool, String) {
     if !running || cfg.clip_secret.is_empty() {
-        return (false, "먼저 클립보드 공유를 켜고 상대 PC 주소와 암호문구를 넣어 주세요.".into());
+        return (false, "먼저 클립보드 공유를 켜고 상대 컴퓨터 주소와 암호문구를 넣어 주세요.".into());
     }
     let keys = clip::derive_keys(&cfg.clip_secret);
     let msg = format!("LogiFlow 연결 확인 ✓ {}", super::session::local_time_hms().get(..8).unwrap_or(""));
@@ -500,11 +500,11 @@ pub fn send_test(running: bool, cfg: &AppConfig) -> (bool, String) {
         Ok(()) => (
             true,
             format!(
-                "상대 PC 에 연결되어 시험 글을 보냈습니다.\n상대 PC 에서 붙여 넣기(Windows 는 Ctrl+V · Mac 은 ⌘V) 했을 때\n\"{}\"\n가 나오면 양쪽이 같은 암호문구입니다.",
+                "상대 컴퓨터에 연결되어 시험 글을 보냈습니다.\n상대 컴퓨터에서 붙여 넣기(Windows 는 Ctrl+V · Mac 은 ⌘V) 했을 때\n\"{}\"\n가 나오면 양쪽이 같은 암호문구입니다.",
                 msg
             ),
         ),
-        Err(SendErr::Timeout) => (false, "보내지 못했습니다(시간 초과).\n상대 PC 가 켜져 있는지, 상대 PC 의 방화벽이 허용됐는지 확인하세요.".into()),
+        Err(SendErr::Timeout) => (false, "보내지 못했습니다(시간 초과).\n상대 컴퓨터가 켜져 있는지, 상대 컴퓨터의 방화벽이 허용됐는지 확인하세요.".into()),
         Err(SendErr::Other(e)) => (false, format!("보내지 못했습니다.\n({})", e)),
     }
 }

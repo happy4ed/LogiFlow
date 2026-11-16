@@ -2,6 +2,8 @@
 //! (모니터 크기 사각형)를 가장자리에 끌어 붙인다. 붙음 = 자동(파랑 실선) · 떨어짐 = 수동(회색 점선).
 //! rs.3(첫 사용 점검 반영): 아래 줄 상자의 상태 글자가 잘리지 않게 자리를 비우고, 이름이 기본값이면 「채널 N」만,
 //! 모니터에는 이 PC 의 채널을 적고, 상태 글자는 파랑(누를 수 있는 것) 대신 보조색, 상자 위에서는 손 모양 커서.
+//! 0.16.2: 모니터 상자 아래 줄은 「이 PC · 채널 1」(모니터 번호와 채널 번호를 헷갈리지 않게), 모니터 폭은 글자에 맞춰
+//! 늘림(좌우 16 이상 — 「크게」에서 테두리에 닿던 것), 이름 없는 채널 상자는 모니터 대신 번호만 있는 아이콘.
 
 use crate::paint::{c, draw_icon, font, rounded_points, Icon};
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
@@ -13,6 +15,8 @@ const PAD: f32 = 14.0;
 const SNAP_PX: i32 = 30;
 const MIN_SCALE: f64 = 0.035;
 const MAX_SCALE: f64 = 0.16;
+/// 모니터 상자 안 글자의 좌우 여백(8 의 배수).
+const TEXT_MX: f32 = 16.0;
 
 #[derive(Clone, Debug)]
 pub struct Screen {
@@ -40,7 +44,9 @@ pub struct Canvas {
     v_top: i32,
     v_w: i32,
     v_h: i32,
-    scale: f64,
+    /// 가로·세로 배율. 가로는 모니터 글자가 들어가도록 세로보다 클 수 있다(캔버스 폭 안에서만).
+    sx: f64,
+    sy: f64,
     size: Vec2,
     dragging: Option<usize>,
     drag_offset: Vec2,
@@ -119,8 +125,9 @@ impl Canvas {
         self.v_h = (b + my - self.v_top).max(1);
     }
 
-    /// C# RelayoutToHost — 뷰포트에 꼭 맞는 스케일(상·하한).
-    pub fn relayout(&mut self, viewport: Vec2) {
+    /// C# RelayoutToHost — 뷰포트에 꼭 맞는 스케일(상·하한). min_mon_w = 모니터 상자에 글자가 좌우 여백까지 들어가는 폭 —
+    /// 가장 좁은 모니터가 이보다 좁으면 가로 배율만 키운다(캔버스 폭을 넘지 않는 데까지 · 0.16.2 「크게」 여백).
+    pub fn relayout(&mut self, viewport: Vec2, min_mon_w: f32) {
         if self.screens.is_empty() {
             self.size = viewport.max(Vec2::splat(1.0));
             return;
@@ -128,9 +135,13 @@ impl Canvas {
         self.compute_virtual();
         let fit_w = (viewport.x as f64 - 2.0 * PAD as f64) / self.v_w as f64;
         let fit_h = (viewport.y as f64 - 2.0 * PAD as f64) / self.v_h as f64;
-        self.scale = fit_w.min(fit_h).clamp(MIN_SCALE, MAX_SCALE);
-        let need_w = (self.v_w as f64 * self.scale) as f32 + 2.0 * PAD;
-        let need_h = (self.v_h as f64 * self.scale) as f32 + 2.0 * PAD;
+        let s = fit_w.min(fit_h).clamp(MIN_SCALE, MAX_SCALE);
+        let narrow = self.screens.iter().map(|s| s.bounds.width).min().unwrap_or(1).max(1) as f64;
+        let want_x = (min_mon_w as f64 / narrow).min(fit_w.max(s));
+        self.sx = s.max(want_x);
+        self.sy = s;
+        let need_w = (self.v_w as f64 * self.sx) as f32 + 2.0 * PAD;
+        let need_h = (self.v_h as f64 * self.sy) as f32 + 2.0 * PAD;
         self.size = Vec2::new(viewport.x.max(need_w), viewport.y.max(need_h));
     }
 
@@ -159,17 +170,17 @@ impl Canvas {
         if self.screens.is_empty() {
             return;
         }
-        let drawn_w = self.v_w as f64 * self.scale;
-        let drawn_h = self.v_h as f64 * self.scale;
+        let drawn_w = self.v_w as f64 * self.sx;
+        let drawn_h = self.v_h as f64 * self.sy;
         let off_x = (PAD as f64).max((self.size.x as f64 - drawn_w) / 2.0);
         let off_y = (PAD as f64).max((self.size.y as f64 - drawn_h) / 2.0);
         let (mut sw, mut sh) = (0f64, 0f64);
         for s in &self.screens {
             let b = s.bounds;
-            let px = (off_x + (b.left - self.v_left) as f64 * self.scale) as i32;
-            let py = (off_y + (b.top - self.v_top) as f64 * self.scale) as i32;
-            let pw = (b.width as f64 * self.scale) as i32;
-            let ph = (b.height as f64 * self.scale) as i32;
+            let px = (off_x + (b.left - self.v_left) as f64 * self.sx) as i32;
+            let py = (off_y + (b.top - self.v_top) as f64 * self.sy) as i32;
+            let pw = (b.width as f64 * self.sx) as i32;
+            let ph = (b.height as f64 * self.sy) as i32;
             self.mon_rects.push(HandoffRect::new(px, py, pw, ph));
             sw += pw as f64;
             sh += ph as f64;
@@ -210,6 +221,7 @@ impl Canvas {
     }
 
     /// 그리고 끌기를 처리한다. 배치가 바뀌면 Some(새 배치).
+    /// this_pc = 모니터 상자 아래 줄 조각(「이 PC」 · 「채널 1」) — 한 줄(「이 PC · 채널 1」)로 들어가면 한 줄, 아니면 조각마다 한 줄.
     pub fn show(
         &mut self,
         ui: &Ui,
@@ -223,7 +235,14 @@ impl Canvas {
         paused: bool,
     ) -> Option<Vec<EdgeAttachment>> {
         self.sub_h = ui.painter().layout_no_wrap("가".into(), font(10.0, off, false), Color32::WHITE).size().y;
-        self.relayout(viewport);
+        // 모니터 상자에 들어갈 가장 긴 줄(굵은 「모니터 N」 · 「이 PC · 채널 1」 · 「주 모니터」) + 좌우 여백.
+        let tw = |t: &str, bold: bool| ui.painter().layout_no_wrap(t.to_string(), font(10.5, off, bold), Color32::WHITE).size().x;
+        let joined = this_pc.join(" · ");
+        let mut widest = tw(&joined, false).max(tw("주 모니터", false));
+        for i in 0..self.screens.len().max(1) {
+            widest = widest.max(tw(&format!("모니터 {}", i + 1), true));
+        }
+        self.relayout(viewport, widest + 2.0 * TEXT_MX);
         self.recompute_monitor_rects();
         let host = Rect::from_min_size(origin, viewport);
         let p = ui.painter().with_clip_rect(host.intersect(ui.clip_rect()));
@@ -253,13 +272,13 @@ impl Canvas {
             let primary = i == self.primary;
             p.rect_filled(rect, CornerRadius::same(5), c(pal.mon_fill));
             p.rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.5, c(pal.mon_stroke)), StrokeKind::Middle);
+            let inner_w = rect.width() - 2.0 * TEXT_MX;
             let mut lines: Vec<(String, bool)> = vec![(format!("모니터 {}", i + 1), true)];
-            // 이 PC 표시 — 칸에 들어가는 가장 긴 후보(예: 「이 PC · 채널 1」 → 「이 PC」).
-            if let Some(t) = this_pc
-                .iter()
-                .find(|t| p.layout_no_wrap((*t).clone(), font(10.5, off, false), Color32::WHITE).size().x <= rect.width() - 6.0)
-            {
-                lines.push((t.clone(), false));
+            // 이 PC 표시 — 「이 PC · 채널 1」 한 줄이 들어가면 한 줄, 아니면 「이 PC」 / 「채널 1」 두 줄.
+            if tw(&joined, false) <= inner_w {
+                lines.push((joined.clone(), false));
+            } else {
+                lines.extend(this_pc.iter().map(|t| (t.clone(), false)));
             }
             if multi && primary {
                 lines.push(("주 모니터".into(), false));
@@ -267,12 +286,12 @@ impl Canvas {
             let galleys: Vec<_> = lines
                 .into_iter()
                 .map(|(t, bold)| p.layout_no_wrap(t, font(10.5, off, bold), c(if bold { pal.ink } else { pal.muted })))
-                .filter(|g| g.size().x <= rect.width() - 6.0)
+                .filter(|g| g.size().x <= inner_w)
                 .collect();
             let mut shown = Vec::new();
             let mut total = 0.0;
             for g in galleys {
-                if total + g.size().y > rect.height() - 4.0 {
+                if total + g.size().y > rect.height() - 8.0 {
                     break;
                 }
                 total += g.size().y;
@@ -306,13 +325,23 @@ impl Canvas {
                 p.extend(Shape::dashed_line(&pts, Stroke::new(1.5, stroke_col), 4.5, 1.5));
             }
             let gs = r.width().min(r.height()) * 0.34;
-            draw_icon(
-                &p,
-                box_icon(&label(self.boxes[i].channel)),
-                Rect::from_center_size(r.center(), Vec2::splat(gs)),
-                c(if auto { pal.accent } else { pal.muted }),
-            );
-            let title = label(self.boxes[i].channel);
+            let ch = self.boxes[i].channel;
+            let title = label(ch);
+            let icon_col = c(if auto { pal.accent } else { pal.muted });
+            // 이름을 붙이지 않은 채널은 모니터 모양 대신 번호만 — 옆 「모니터 1」(이 PC)과 같은 것으로 읽히지 않게(0.16.2).
+            if title == format!("채널 {}", ch + 1) {
+                let rad = gs * 0.62;
+                p.circle_stroke(r.center(), rad, Stroke::new(1.5, icon_col));
+                p.text(
+                    r.center(),
+                    Align2::CENTER_CENTER,
+                    format!("{}", ch + 1),
+                    egui::FontId::new(rad * 1.15, egui::FontFamily::Name("bold".into())),
+                    icon_col,
+                );
+            } else {
+                draw_icon(&p, box_icon(&title), Rect::from_center_size(r.center(), Vec2::splat(gs)), icon_col);
+            }
             let ft = font(11.0, off, true);
             let th = p.layout_no_wrap(title.clone(), ft.clone(), Color32::WHITE).size().y;
             p.text(Pos2::new(r.left(), r.top() - th - 2.0), Align2::LEFT_TOP, title, ft, c(pal.ink));
@@ -398,7 +427,8 @@ impl Canvas {
     }
 }
 
-/// 채널 상자 아이콘 — 이름이 노트북이면 노트북 모양, 아니면 모니터(0.16.1 첫 사용 점검: 「노트북」 상자가 데스크톱 모양).
+/// 이름 붙인 채널 상자 아이콘 — 이름이 노트북이면 노트북 모양, 아니면 모니터(0.16.1 첫 사용 점검: 「노트북」 상자가 데스크톱 모양).
+/// 이름이 없으면 그리는 쪽에서 번호만 둔다(0.16.2).
 fn box_icon(name: &str) -> Icon {
     let n = name.to_lowercase();
     if ["노트북", "랩탑", "맥북", "laptop", "notebook", "macbook", "그램", "thinkpad", "surface"]

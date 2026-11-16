@@ -46,7 +46,7 @@ mod snap {
             current_host: 0,
             ..Default::default()
         };
-        // 전환이 안 되는 장치(리시버 자체) 하나 — 「자세히 보기」 모양을 찍으려고.
+        // 전환이 안 되는 장치(리시버 자체) 하나 — 「문의용 번호 보기」 모양을 찍으려고.
         let receiver = ScanResult {
             device_name: "USB Receiver".into(),
             vid_pid: "046D:C548".into(),
@@ -79,15 +79,20 @@ mod snap {
             steps.push((1, false, off, false, 3)); // 설정 가운데(클립보드 공유 위쪽)
         }
         if with_legacy {
-            // 기존 LogiFlow(이전 판)가 남은 모양 — 전환 관리 카드 안 알림 · 진단 카드.
+            // 이전 판(C# 판)이 남은 모양 — 전환 관리 카드 안 알림 · 진단 카드.
             steps.push((0, false, 1, false, 4));
             steps.push((0, false, 3, false, 4));
             steps.push((2, false, 1, false, 4));
         }
-        steps.push((0, false, 1, true, 2)); // 기기 자세히 보기
+        steps.push((0, false, 1, true, 2)); // 기기 문의용 번호 보기
         steps.push((0, false, 3, true, 2));
         steps.push((0, false, 1, false, 5)); // 기기를 못 찾았을 때(빈 화면 안내)
         steps.push((0, true, -1, false, 5));
+        steps.push((0, false, 3, true, 5)); // 기기를 못 찾았을 때 아래(「기기」 묶음)
+        steps.push((1, false, 1, false, 6)); // 설정 가운데 + 「다른 주소 보기」 펼침
+        if with_legacy {
+            steps.push((2, true, 1, false, 4)); // 이전 판 진단 카드(다크)
+        }
         (shared, steps)
     }
 

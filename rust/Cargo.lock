@@ -1626,7 +1626,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "logiflow-app"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "embed-manifest",
  "embed-resource",
@@ -1638,7 +1638,7 @@ dependencies = [
 
 [[package]]
 name = "logiflow-core"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "aes",
  "cbc",
@@ -1654,7 +1654,7 @@ dependencies = [
 
 [[package]]
 name = "logiflow-linux"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "libc",
  "logiflow-core",
@@ -1662,7 +1662,7 @@ dependencies = [
 
 [[package]]
 name = "logiflow-mac"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "arboard",
  "block2 0.6.2",
@@ -1681,7 +1681,7 @@ dependencies = [
 
 [[package]]
 name = "logiflow-ui"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "eframe",
  "egui",
@@ -1696,7 +1696,7 @@ dependencies = [
 
 [[package]]
 name = "logiflow-win"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "arboard",
  "logiflow-core",

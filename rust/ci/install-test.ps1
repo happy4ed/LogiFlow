@@ -1,4 +1,4 @@
-﻿# 설치·업그레이드·제거 경로 시험(0.16.0~ — 이 앱이 Windows 기본 판). ⑥ 0.16.1~: 공개 0.16.0 위 제자리 업그레이드.
+﻿# 설치·업그레이드·제거 경로 시험(0.16.0~ — 이 앱이 Windows 기본 판). ⑥ 공개 0.16.0 · 0.16.1 위 제자리 업그레이드.
 # ① 실제 C# 0.15.0 설치 + 그 설정(자동 시작·로그온 전에도 실행 켬) → ② 새 설치 파일 실행: 이전 판이 지워지고 이 앱이 깔리는지,
 # ③ 처음 실행: 설정을 값 그대로 이어받는지(로그온 전에도 실행만 꺼 두고 묻기), ④ 같은 설치 파일로 다시 설치(제자리 업그레이드),
 # ⑤ 제거: 앱·자동 시작이 지워지고 사용자 설정은 남는지.
@@ -74,24 +74,26 @@ Check 'uninstall: Run value gone' ($null -eq (Get-ItemProperty $runKey -Name Log
 Check 'uninstall: tray task gone' ((Invoke-Native schtasks.exe /Query /TN LogiFlowRs-Tray) -ne 0)
 Check 'uninstall: user settings kept' (Test-Path $our)
 
-# ⑥ 0.16.1~: 공개된 0.16.0(Windows 기본 판) 위 제자리 업그레이드 — 같은 AppId 라 Apps 항목 하나 · 판 번호만 바뀌고 설정 그대로.
-if ($Version -ne '0.16.0') {
-  $prev = Join-Path $env:RUNNER_TEMP 'LogiFlow-v0.16.0-setup.exe'
-  if (-not (Test-Path $prev)) { gh release download v0.16.0 -p 'LogiFlow-v0.16.0-setup.exe' -D $env:RUNNER_TEMP --clobber }
+# ⑥ 공개된 이전 판(Windows 기본 판) 위 제자리 업그레이드 — 같은 AppId 라 Apps 항목 하나 · 판 번호만 바뀌고 설정 그대로.
+#    0.16.1~: 0.16.0 → 새 판 · 0.16.2~: 0.16.1 → 새 판도(판마다 하나씩 늘린다 — 지금 판보다 앞선 공개 판만).
+$prevs = @('0.16.0', '0.16.1') | Where-Object { [version]$_ -lt [version]($Version -replace '-.*$', '') }
+foreach ($pv in $prevs) {
+  $prev = Join-Path $env:RUNNER_TEMP "LogiFlow-v$pv-setup.exe"
+  if (-not (Test-Path $prev)) { gh release download "v$pv" -p "LogiFlow-v$pv-setup.exe" -D $env:RUNNER_TEMP --clobber }
   Start-Process $prev -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait
   $k0 = Get-ItemProperty $ourKey -ErrorAction SilentlyContinue
-  Check 'prev 0.16.0 installed' ($k0 -and $k0.DisplayVersion -eq '0.16.0')
+  Check "prev $pv installed" ($k0 -and $k0.DisplayVersion -eq $pv)
   $before = Get-Content $our -Raw -Encoding UTF8
   Start-Process $Setup -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait
   $k1 = Get-ItemProperty $ourKey -ErrorAction SilentlyContinue
-  Check "0.16.0 -> $Version version" ($k1 -and $k1.DisplayVersion -eq $Version)
+  Check "$pv -> $Version version" ($k1 -and $k1.DisplayVersion -eq $Version)
   $entries = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -eq 'LogiFlow' })
-  Check '0.16.0 -> new: one Apps entry' ($entries.Count -eq 1)
-  Check '0.16.0 -> new: exe there' (Test-Path $ourExe)
-  Check '0.16.0 -> new: settings unchanged' ((Get-Content $our -Raw -Encoding UTF8) -eq $before)
+  Check "$pv -> new: one Apps entry" ($entries.Count -eq 1)
+  Check "$pv -> new: exe there" (Test-Path $ourExe)
+  Check "$pv -> new: settings unchanged" ((Get-Content $our -Raw -Encoding UTF8) -eq $before)
   Start-Process (Join-Path (Split-Path $ourExe) 'unins000.exe') -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait
   for ($i = 0; $i -lt 60 -and (Test-Path $ourKey); $i++) { Start-Sleep -Milliseconds 500 }
-  Check '0.16.0 -> new: uninstall clean' (-not (Test-Path $ourKey))
+  Check "$pv -> new: uninstall clean" (-not (Test-Path $ourKey))
 }
 
 $bad = $checks.GetEnumerator() | Where-Object { -not $_.Value }

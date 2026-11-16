@@ -81,7 +81,7 @@ pub const CAPS: Caps = Caps {
 
 /// 화면 글 중 Windows 에만 맞는 말을 Mac 말로(공용 설정 창 글은 Windows 기준으로 쓰여 있다).
 /// Mac 판 첫 사용 점검(11-16): Mac 에서 「PC」는 Windows 컴퓨터로 읽힌다 → 「컴퓨터」, 자기 자신은 「이 Mac」.
-/// 상대 화면의 이름을 가리키는 곳(「이 PC 주소」 · 「상대 PC 주소」)은 상대가 Windows 일 수도 있어 두 이름을 함께 적는다.
+/// 0.16.2: 주소 칸 이름은 두 OS 모두 「이 컴퓨터 주소」 · 「상대 컴퓨터 주소」라 바꿀 것이 없다(전에는 두 이름을 괄호로 함께 적음).
 const WORDS: &[(&str, &str)] = &[
     ("Windows 시작 시 실행", "로그인 시 열기"),
     (
@@ -107,12 +107,6 @@ const WORDS: &[(&str, &str)] = &[
 
 /// 글 전체가 이것일 때만(세그먼트 항목 등).
 const EXACT: &[(&str, &str)] = &[("시스템", "자동")];
-
-/// 상대 화면 이름(먼저 감춰 두었다가 마지막에 두 이름으로).
-const PEER_LABELS: &[(&str, char, &str)] = &[
-    ("「이 PC 주소」", '\u{E000}', "「이 PC 주소」(Mac 은 「이 Mac 주소」)"),
-    ("「상대 PC 주소」", '\u{E001}', "「상대 PC 주소」(Mac 은 「상대 컴퓨터 주소」)"),
-];
 
 /// 낱말 「PC」(IPC 같은 낱말 속은 빼고) → 「컴퓨터」. 뒤에 띄어 쓴 조사는 붙인다(「PC 가」 → 「컴퓨터가」).
 fn pc_to_computer(s: &str) -> String {
@@ -150,19 +144,12 @@ pub fn localize(s: &str) -> Cow<'_, str> {
         return Cow::Borrowed(s);
     }
     let mut out = s.to_string();
-    for (label, token, _) in PEER_LABELS {
-        out = out.replace(label, &token.to_string());
-    }
     for (from, to) in WORDS {
         if out.contains(from) {
             out = out.replace(from, to);
         }
     }
-    let mut out = pc_to_computer(&out);
-    for (_, token, full) in PEER_LABELS {
-        out = out.replace(*token, full);
-    }
-    Cow::Owned(out)
+    Cow::Owned(pc_to_computer(&out))
 }
 
 #[cfg(test)]
@@ -174,10 +161,13 @@ mod tests {
         assert_eq!(localize("이 PC 로 되돌리려면"), "이 Mac 으로 되돌리려면");
         assert_eq!(localize("상대 PC 주소"), "상대 컴퓨터 주소");
         assert_eq!(localize("두 PC 에 같은 값을 넣습니다."), "두 컴퓨터에 같은 값을 넣습니다.");
+        // 주소 칸 이름은 두 OS 같음 — 그대로(괄호 보충 없음).
         assert_eq!(
-            localize("상대 PC 의 「이 PC 주소」를 넣습니다."),
-            "상대 컴퓨터의 「이 PC 주소」(Mac 은 「이 Mac 주소」)를 넣습니다."
+            localize("상대 컴퓨터의 「이 컴퓨터 주소」를 넣습니다."),
+            "상대 컴퓨터의 「이 컴퓨터 주소」를 넣습니다."
         );
+        assert_eq!(localize("이 컴퓨터 주소"), "이 컴퓨터 주소");
+        assert_eq!(localize("이 PC · 채널 1"), "이 Mac · 채널 1");
         assert_eq!(localize("IPC 창"), "IPC 창");
         assert_eq!(localize("시스템"), "자동");
         assert_eq!(localize("시스템 설정을 따릅니다"), "시스템 설정을 따릅니다");

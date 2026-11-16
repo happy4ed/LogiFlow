@@ -184,7 +184,7 @@ fn offer_prelogon_once() {
             None,
             "LogiFlow",
             "이전 판에서 쓰던 「로그인 전에도 실행」을 켤까요?",
-            "켜면 PC 를 켠 직후의 로그인 화면과 잠금 화면에서도 가장자리로 밀면 넘어갑니다. 이전 판의 서비스·남은 파일을 정리하고 이 앱의 서비스를 설치합니다(관리자 승인 한 번). 나중에 설정 창에서 켤 수도 있습니다.",
+            "켜면 PC 를 켠 직후의 로그인 화면과 잠금 화면에서도 가장자리로 밀면 넘어갑니다. 이전 판의 서비스·남은 파일을 지우고 이 앱의 서비스를 설치합니다(관리자 승인 한 번). 나중에 설정 창에서 켤 수도 있습니다.",
             &[(1001, "켜기")],
         );
         if pick != 1001 {
@@ -469,14 +469,14 @@ fn reconfigure_watcher() {
     if cfg.tray_should_watch(edge_watcher::has_attachments(), sw) {
         if legacy::conflict() {
             log.log("기존 LogiFlow(C# 판)가 남아 있음 — 가장자리 감시 끔(중복 전환 방지)");
-            // 한 번만 알림 — 설정 창 「전환 관리」·「진단」의 「기존 LogiFlow 정리」로 지울 수 있다.
+            // 한 번만 알림 — 설정 창 「전환 관리」·「진단」의 「이전 판 지우기」로 지울 수 있다.
             static TOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
             if !TOLD.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 with(|t| {
                     notify::balloon(
                         t.hwnd,
                         "LogiFlow",
-                        "기존 LogiFlow(이전 판)가 남아 있어 가장자리 자동 전환을 멈춰 두었습니다. 설정 창에서 「기존 LogiFlow 정리」를 누르세요.",
+                        "이전 판이 남아 있어 가장자리 자동 전환을 멈춰 두었습니다. 설정 창에서 「이전 판 지우기」를 누르세요.",
                         true,
                     )
                 });
