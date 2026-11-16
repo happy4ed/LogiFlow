@@ -3,8 +3,8 @@
 # 방화벽 규칙·Run 값)을 흉내 낸 뒤 `--cleanup-legacy` 를 돌려 전부 사라지고 %APPDATA%\LogiFlow 는 그대로인지 본다.
 param([string]$Exe)
 $ErrorActionPreference = 'Stop'
-# 바깥 명령 실행 → 종료 코드(출력 버림).
-function R([string]$exe) { & $exe @args *> $null; return $LASTEXITCODE }
+# 바깥 명령 실행 → 종료 코드(출력 버림). 이름을 R 로 하면 PowerShell 기본 별칭 R(Invoke-History)에 가려진다.
+function Invoke-Native([string]$exe) { & $exe @args *> $null; return $LASTEXITCODE }
 
 # 1) 실제 C# 판 설치(사용자 범위, 조용히).
 $setup = Join-Path $env:RUNNER_TEMP 'LogiFlow-v0.15.0-setup.exe'
@@ -25,16 +25,16 @@ New-Item (Join-Path $md 'worker') -ItemType Directory -Force | Out-Null
 Copy-Item "$env:WINDIR\System32\PING.EXE" (Join-Path $md 'worker\LogiFlow.exe')
 Set-Content (Join-Path $md 'logon-edges.txt') 'dwellMs=330'
 $worker = Start-Process (Join-Path $md 'worker\LogiFlow.exe') -ArgumentList '-n 600 127.0.0.1' -WindowStyle Hidden -PassThru
-R sc.exe create LogiFlowLogonSwitch 'binPath=' 'C:\Windows\System32\cmd.exe /c exit' 'start=' demand | Out-Null
-R schtasks.exe /Create /TN LogiFlow-PreLogon /TR 'cmd /c exit' /SC ONSTART /RU SYSTEM /F | Out-Null
-R schtasks.exe /Create /TN LogiFlow-DesktopProbe /TR 'cmd /c exit' /SC ONSTART /RU SYSTEM /F | Out-Null
-R schtasks.exe /Create /TN LogiFlow-Tray /TR 'cmd /c exit' /SC ONLOGON /F | Out-Null
-R netsh.exe advfirewall firewall add rule 'name=LogiFlow Clipboard' dir=in action=allow protocol=TCP localport=48737 | Out-Null
+Invoke-Native sc.exe create LogiFlowLogonSwitch 'binPath=' 'C:\Windows\System32\cmd.exe /c exit' 'start=' demand | Out-Null
+Invoke-Native schtasks.exe /Create /TN LogiFlow-PreLogon /TR 'cmd /c exit' /SC ONSTART /RU SYSTEM /F | Out-Null
+Invoke-Native schtasks.exe /Create /TN LogiFlow-DesktopProbe /TR 'cmd /c exit' /SC ONSTART /RU SYSTEM /F | Out-Null
+Invoke-Native schtasks.exe /Create /TN LogiFlow-Tray /TR 'cmd /c exit' /SC ONLOGON /F | Out-Null
+Invoke-Native netsh.exe advfirewall firewall add rule 'name=LogiFlow Clipboard' dir=in action=allow protocol=TCP localport=48737 | Out-Null
 $before = @{
-  service = (R sc.exe query LogiFlowLogonSwitch) -eq 0
-  tasks = @('LogiFlow-PreLogon','LogiFlow-DesktopProbe','LogiFlow-Tray' | Where-Object { (R schtasks.exe /Query /TN $_) -eq 0 }).Count
+  service = (Invoke-Native sc.exe query LogiFlowLogonSwitch) -eq 0
+  tasks = @('LogiFlow-PreLogon','LogiFlow-DesktopProbe','LogiFlow-Tray' | Where-Object { (Invoke-Native schtasks.exe /Query /TN $_) -eq 0 }).Count
   dir = Test-Path $md
-  fw = (R netsh.exe advfirewall firewall show rule 'name=LogiFlow Clipboard') -eq 0
+  fw = (Invoke-Native netsh.exe advfirewall firewall show rule 'name=LogiFlow Clipboard') -eq 0
   run = $null -ne (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name LogiFlow -ErrorAction SilentlyContinue)
   worker = -not $worker.HasExited
 }
@@ -53,10 +53,10 @@ Start-Sleep -Seconds 1
 $after = [ordered]@{
   csKeyGone = -not (Test-Path $ukey)
   csExeGone = -not (Test-Path $csExe)
-  serviceGone = (R sc.exe query LogiFlowLogonSwitch) -ne 0
-  tasksGone = @('LogiFlow-PreLogon','LogiFlow-DesktopProbe','LogiFlow-Tray' | Where-Object { (R schtasks.exe /Query /TN $_) -eq 0 }).Count -eq 0
+  serviceGone = (Invoke-Native sc.exe query LogiFlowLogonSwitch) -ne 0
+  tasksGone = @('LogiFlow-PreLogon','LogiFlow-DesktopProbe','LogiFlow-Tray' | Where-Object { (Invoke-Native schtasks.exe /Query /TN $_) -eq 0 }).Count -eq 0
   dirGone = -not (Test-Path $md)
-  fwGone = (R netsh.exe advfirewall firewall show rule 'name=LogiFlow Clipboard') -ne 0
+  fwGone = (Invoke-Native netsh.exe advfirewall firewall show rule 'name=LogiFlow Clipboard') -ne 0
   runGone = $null -eq (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name LogiFlow -ErrorAction SilentlyContinue)
   workerGone = $worker.HasExited
   settingsKept = (Test-Path (Join-Path $appdata 'config.txt')) -and ((Get-Content (Join-Path $appdata 'config.txt') -Raw) -eq $sentinel)
