@@ -112,10 +112,13 @@ impl Leftovers {
             v.push("실행 중인 트레이");
         }
         if self.service {
-            v.push("「로그온 전에도 실행」 서비스");
+            v.push("이전 판의 로그인 전 실행 서비스");
         }
-        if self.machine_dir || self.run_value {
-            v.push("남은 파일·자동 시작 항목");
+        if self.machine_dir {
+            v.push("남은 파일");
+        }
+        if self.run_value {
+            v.push("자동 시작 항목");
         }
         v.join(" · ")
     }

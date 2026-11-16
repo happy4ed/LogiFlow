@@ -220,6 +220,7 @@ impl Canvas {
         interactive: bool,
         label: &dyn Fn(i32) -> String,
         this_pc: &[String],
+        paused: bool,
     ) -> Option<Vec<EdgeAttachment>> {
         self.sub_h = ui.painter().layout_no_wrap("가".into(), font(10.0, off, false), Color32::WHITE).size().y;
         self.relayout(viewport);
@@ -318,7 +319,13 @@ impl Canvas {
             p.text(
                 Pos2::new(r.left(), r.bottom() + 2.0),
                 Align2::LEFT_TOP,
-                if auto { "밀면 넘어감" } else { "안 넘어감" },
+                if auto && !paused {
+                    "밀면 넘어감"
+                } else if auto {
+                    "멈춤"
+                } else {
+                    "안 넘어감"
+                },
                 font(10.0, off, false),
                 c(pal.muted),
             );

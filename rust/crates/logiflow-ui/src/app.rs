@@ -616,6 +616,38 @@ impl SettingsApp {
             "채널은 마우스·키보드의 Easy-Switch 단추 번호(1~3)이고, 단추마다 PC 가 하나씩 짝지어져 있습니다. 채널 상자를 끌어 이 PC 모니터의 가장자리에 붙이고, 하나만 떼려면 그 상자를 모니터에서 멀리 끌어 놓으세요. 잠깐 끄려면 아래 「가장자리 자동 전환」의 「사용」을 끄면 됩니다.",
         );
 
+        // 이전 판이 남아 트레이가 가장자리 감시를 멈춘 상태 — 화면 맨 위에서 바로 정리(캔버스·스위치만 보고
+        // 「되는데 안 넘어간다」고 헤매지 않게).
+        let legacy_now = self.legacy.lock().unwrap().clone();
+        // 붙인 상자가 지금은 넘기지 않는 때(이전 판 때문에 멈춤 · 「사용」 꺼짐) — 캔버스에 「멈춤」.
+        let paused = legacy_now.as_ref().map(|l| l.conflicts()).unwrap_or(false) || !cfg.edge_switch_enabled;
+        if let Some(l) = legacy_now.filter(|l| l.conflicts()) {
+            let slot = pc.card_begin();
+            let top = y;
+            let (hit, h) = buttons_row(
+                pc,
+                "legacy1",
+                x0,
+                y,
+                w,
+                Line::new(
+                    "가장자리 자동 전환이 멈춰 있습니다",
+                    format!(
+                        "기존 LogiFlow(이전 판)가 남아 있어 두 앱이 함께 넘기지 않도록 멈춰 두었습니다. 남은 것: {}.",
+                        l.describe()
+                    ),
+                )
+                .status("정리하면 바로 다시 켜집니다", p.warn),
+                &[("기존 LogiFlow 정리", None, Variant::Default)],
+            );
+            if hit.is_some() {
+                self.start_legacy_cleanup(cfg, false);
+            }
+            y += h;
+            pc.card_end(slot, x0, top, w, y - top);
+            y += 16.0;
+        }
+
         // 캔버스(이 PC 모니터 + 다른 채널 상자).
         let canvas_h = 300.0;
         let max_host = max_host_count(devices);
@@ -645,6 +677,7 @@ impl SettingsApp {
             pc.interactive,
             &label,
             &this_pc,
+            paused,
         ) {
             self.set_layout(cfg, att);
         }
@@ -688,28 +721,6 @@ impl SettingsApp {
             self.apply(|c| c.edge_switch_enabled = !c.edge_switch_enabled);
         }
         y += h;
-        // 이전 판이 남아 트레이가 가장자리 감시를 멈춘 상태 — 여기서 바로 정리.
-        let legacy_now = self.legacy.lock().unwrap().clone();
-        if let Some(l) = legacy_now.filter(|l| l.conflicts()) {
-            divider(pc, x0, y, w);
-            let (hit, h) = buttons_row(
-                pc,
-                "legacy1",
-                x0,
-                y,
-                w,
-                Line::new(
-                    "기존 LogiFlow 가 남아 있음",
-                    format!("남은 것: {}. 두 앱이 함께 넘기지 않도록 가장자리 자동 전환을 멈춰 두었습니다.", l.describe()),
-                )
-                .status("멈춤 — 정리하면 다시 켜집니다", p.warn),
-                &[("기존 LogiFlow 정리", None, Variant::Default)],
-            );
-            if hit.is_some() {
-                self.start_legacy_cleanup(cfg, false);
-            }
-            y += h;
-        }
         divider(pc, x0, y, w);
         let dwell_lab = dwell_text(cfg.dwell_ms);
         let (hit, h) = buttons_row(
@@ -1389,10 +1400,10 @@ impl SettingsApp {
         let found = self.legacy.lock().unwrap().clone().unwrap_or_default();
         let what = if found.any() { found.describe() } else { "남은 흔적".to_string() };
         let content = format!(
-            "남은 것: {}.\r\n\r\n정리하면 이전 판의 앱·「로그온 전에도 실행」 서비스·예약 작업·남은 파일을 지웁니다. 이전 판의 설정 파일(%APPDATA%\\LogiFlow)은 지우지 않습니다. 관리자 승인이 한 번 필요합니다.{}",
+            "남은 것: {}.\r\n\r\n정리하면 이전 판의 앱·로그인 전 실행 서비스·예약 작업·자동 시작 항목·남은 파일을 모두 지웁니다. 이전 판의 설정 파일(%APPDATA%\\LogiFlow)은 지우지 않습니다. 관리자 승인이 한 번 필요합니다.{}",
             what,
             if then_enable_prelogon {
-                "\r\n정리한 뒤 이어서 「로그인 전에도 실행」을 켭니다."
+                "\r\n정리한 뒤 이 앱의 「로그인 전에도 실행」을 켭니다."
             } else {
                 ""
             }
@@ -1762,7 +1773,7 @@ impl SettingsApp {
                 w,
                 Line::new(
                     "남아 있는 이전 판",
-                    "정리하면 이전 판의 앱·「로그온 전에도 실행」 서비스·예약 작업·남은 파일을 지웁니다. 이전 판의 설정 파일은 남깁니다. 관리자 승인이 한 번 필요할 수 있습니다.",
+                    "정리하면 이전 판의 앱·로그인 전 실행 서비스·예약 작업·자동 시작 항목·남은 파일을 모두 지웁니다. 이전 판의 설정 파일은 남깁니다. 관리자 승인이 한 번 필요할 수 있습니다.",
                 )
                 .status(format!("남은 것: {}", l.describe()), p.warn),
                 &[("기존 LogiFlow 정리", None, Variant::Default)],
