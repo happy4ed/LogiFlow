@@ -212,7 +212,7 @@ impl HidBackend for MacHidBackend {
             .copied()
             .find(|d| read_info(*d).path == info.path)
             .ok_or_else(|| "장치를 찾지 못함(분리됨?)".to_string())?;
-        MacTransport::open(dev, info.output_report_len.max(info.input_report_len))
+        MacTransport::open(dev, info.output_report_len, info.input_report_len)
     }
 }
 
@@ -265,7 +265,7 @@ pub struct MacTransport {
 unsafe impl Send for MacTransport {}
 
 impl MacTransport {
-    fn open(dev: IOHIDDeviceRef, report_len: usize) -> Result<Box<dyn HidTransport>, String> {
+    fn open(dev: IOHIDDeviceRef, out_len: usize, in_len: usize) -> Result<Box<dyn HidTransport>, String> {
         let r = unsafe { IOHIDDeviceOpen(dev, kIOHIDOptionsTypeNone) };
         if r != kIOReturnSuccess {
             return Err(format!("열기 실패(IOReturn 0x{:08X})", r as u32));
@@ -275,7 +275,7 @@ impl MacTransport {
             frames: Mutex::new(VecDeque::new()),
             cond: Condvar::new(),
         });
-        let buf_len = report_len.max(64);
+        let buf_len = in_len.max(out_len).max(64);
         let buf = Box::into_raw(vec![0u8; buf_len].into_boxed_slice()) as *mut u8;
         let ctx = Arc::into_raw(inner.clone()) as *mut c_void;
         let rl = run_loop();
@@ -292,7 +292,7 @@ impl MacTransport {
             ctx: ctx as usize,
             buf: buf as usize,
             buf_len,
-            out_len: report_len,
+            out_len,
         }))
     }
 }
