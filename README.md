@@ -11,7 +11,7 @@
 
 판별 기록은 [Releases](https://github.com/happy4ed/LogiFlow/releases) — 맨 위 Latest 한 판에 세 OS 파일이 같이 있다.
 
-로지텍 Easy-Switch 엣지 전환 프로젝트. 현재 판 0.16.1 — Windows · Mac · Linux 모두 새로 만든 앱(Rust, `rust/`)이
+로지텍 Easy-Switch 엣지 전환 프로젝트. 현재 판 0.16.2 — Windows · Mac · Linux 모두 새로 만든 앱(Rust, `rust/`)이
 기본이다(가장자리로 밀어 채널 전환 · glow · 클립보드 공유, 더 가볍고 빠름). Linux 는 터미널 CLI 다.
 이전 Mac 판(Swift, `mac/`) · Linux 판(`linux/`)은 0.15.0 에서 멈췄다.
 
